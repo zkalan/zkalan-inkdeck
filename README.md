@@ -4,7 +4,9 @@
 
 原生 Swift / AppKit，Apple Silicon，macOS 13 及以上，无第三方运行依赖。单指书写、轻触速度辅助、Force Touch 压力与模拟毛笔，主要操作直接按单键。
 
-[下载应用](https://github.com/zkalan/zkalan-inkdeck/releases/latest) · [验证记录](artifacts/v0.4/VALIDATION.md) · [版本说明](CHANGELOG.md) · [代码来源与依赖](PROVENANCE.md)
+[下载预览应用](https://github.com/zkalan/zkalan-inkdeck/raw/refs/heads/main/downloads/ZkalanInkDeck-0.4.0-macOS-arm64.zip) · [下载与校验文件](downloads) · [验证记录](artifacts/v0.4/VALIDATION.md) · [版本说明](CHANGELOG.md) · [代码来源与依赖](PROVENANCE.md)
+
+当前提供 0.4.0 预览包。模型检查 49 项通过；最后一轮前台输入回归被测试 Mac 的锁屏状态阻止，尚未完成。已保留实际检查结果和验证边界，供试用时参考。
 
 ![桌面标记演示](artifacts/v0.4/desktop-demo.png)
 
@@ -12,9 +14,9 @@
 
 ## 打开
 
-从 Releases 下载 `ZkalanInkDeck-0.4.0-macOS-arm64.zip`，解压后将应用拖到「应用程序」或 `~/Applications`，双击打开。窗口副标题为 `0.4 · 桌面透明标记`，原型旧称「触控板手写 2」，新版会读取已有草稿。
+从本仓库的 `downloads` 下载 `ZkalanInkDeck-0.4.0-macOS-arm64.zip`，解压后将应用拖到「应用程序」或 `~/Applications`，双击打开。窗口副标题为 `0.4 · 桌面透明标记`，原型旧称「触控板手写 2」，新版会读取已有草稿。
 
-这是可试用的原型，采用本地临时签名，尚无 Developer ID 签名或 Apple 公证。首次打开下载包可能被 macOS 拦截；确认来源后按 [Apple 的官方说明](https://support.apple.com/zh-cn/102445)操作，也可以按下文从源码构建。Release 附有 SHA-256 校验文件。
+这是可试用的原型，采用本地临时签名，尚无 Developer ID 签名或 Apple 公证。首次打开下载包可能被 macOS 拦截；确认来源后按 [Apple 的官方说明](https://support.apple.com/zh-cn/102445)操作，也可以按下文从源码构建。下载目录附有 SHA-256 校验文件。
 
 界面改为两行紧凑工具栏和单行状态栏，说明收进「帮助」弹出面板。默认 1180 × 830 内容区内，白色画布为 1166 × 728.75 点，占约 86.8%；窗口改变时保持触控板比例，避免笔迹被拉伸。
 
@@ -120,7 +122,7 @@ zsh scripts/package.sh
 
 `artifacts/v0.4/` 存放结果 JSON、画板与桌面工具条、帮助、透明层、合成演示及导出图片。低压力示例从上到下为原始压力 0%、2%、10%，每条线交替慢速和快速；这些是合成输入。自动测试不读取或修改用户草稿，也不截取桌面内容，不能替代真实硬件触控、压力采样和手感测试。
 
-`scripts/package.sh` 将已构建应用、说明文档和验证制品打包到 `release/` 并生成 SHA-256。源码和测试制品保存在仓库，应用 ZIP 与验证 ZIP 放在 GitHub Release。
+`scripts/package.sh` 将已构建应用、说明文档和验证制品打包到 `release/` 并生成 SHA-256。源码和测试制品保存在仓库，当前预览应用 ZIP 与验证 ZIP 存放在公开的 `downloads/` 目录；正式 Release 待最终前台回归完成后补充。
 
 ## 技术边界
 
