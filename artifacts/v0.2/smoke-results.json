@@ -1,0 +1,19 @@
+{
+  "brushCenterlineHasNoHoles" : true,
+  "brushPathHasArea" : true,
+  "cursorDisassociationAccepted" : true,
+  "cursorHideAccepted" : true,
+  "cursorHideBalanced" : true,
+  "cursorRestoreAccepted" : true,
+  "cursorRestored" : true,
+  "enteredWritingMode" : true,
+  "exitedWritingMode" : true,
+  "navigationLeavesNoInk" : true,
+  "newStrokeUsesTransformedCoordinates" : true,
+  "offscreenContentIncluded" : true,
+  "pinchAndPanTogether" : true,
+  "pngExported" : true,
+  "remainingFingerDoesNotDraw" : true,
+  "separateStrokes" : true,
+  "solidLineHasNoHoles" : true
+}
