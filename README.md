@@ -4,9 +4,9 @@
 
 原生 Swift / AppKit，Apple Silicon，macOS 13 及以上，无第三方运行依赖。单指书写、轻触速度辅助、Force Touch 压力与模拟毛笔，主要操作直接按单键。
 
-[下载预览应用](https://github.com/zkalan/zkalan-inkdeck/raw/refs/heads/main/downloads/ZkalanInkDeck-0.4.0-macOS-arm64.zip) · [下载与校验文件](downloads) · [验证记录](artifacts/v0.4/VALIDATION.md) · [版本说明](CHANGELOG.md) · [代码来源与依赖](PROVENANCE.md)
+[下载应用](https://github.com/zkalan/zkalan-inkdeck/releases/tag/v0.4.0) · [备用下载与校验文件](downloads) · [验证记录](artifacts/v0.4/VALIDATION.md) · [版本说明](CHANGELOG.md) · [代码来源与依赖](PROVENANCE.md)
 
-当前提供 0.4.0 预览包。模型检查 49 项通过；最后一轮前台输入回归被测试 Mac 的锁屏状态阻止，尚未完成。已保留实际检查结果和验证边界，供试用时参考。
+当前版本 0.4.0。49 项模型检查和 69 项应用检查通过；验证使用合成触控/压力以及真实桌面窗口，实物书写手感和会议软件的共享效果仍需试用确认。
 
 ![桌面标记演示](artifacts/v0.4/desktop-demo.png)
 
@@ -14,7 +14,7 @@
 
 ## 打开
 
-从本仓库的 `downloads` 下载 `ZkalanInkDeck-0.4.0-macOS-arm64.zip`，解压后将应用拖到「应用程序」或 `~/Applications`，双击打开。窗口副标题为 `0.4 · 桌面透明标记`，原型旧称「触控板手写 2」，新版会读取已有草稿。
+从 GitHub Release 或本仓库的 `downloads` 下载 `ZkalanInkDeck-0.4.0-macOS-arm64.zip`，解压后将应用拖到「应用程序」或 `~/Applications`，双击打开。窗口副标题为 `0.4 · 桌面透明标记`，原型旧称「触控板手写 2」，新版会读取已有草稿。
 
 这是可试用的原型，采用本地临时签名，尚无 Developer ID 签名或 Apple 公证。首次打开下载包可能被 macOS 拦截；确认来源后按 [Apple 的官方说明](https://support.apple.com/zh-cn/102445)操作，也可以按下文从源码构建。下载目录附有 SHA-256 校验文件。
 
@@ -113,16 +113,15 @@
 ```sh
 zsh scripts/build.sh
 zsh scripts/test.sh
-mkdir -p artifacts/v0.4
-TRACKPAD_INK_ARTIFACTS="$PWD/artifacts/v0.4" 'dist/Zkalan InkDeck.app/Contents/MacOS/ZkalanInkDeck' --smoke-test
+zsh scripts/smoke.sh
 zsh scripts/package.sh
 ```
 
-测试需要在能够连接 macOS 桌面的会话中运行。49 项模型检查覆盖旧版分笔、视窗变换、双指导航、低压力曲线、零压力速度辅助、缩放无关的速度、不同采样率下的平滑一致性、毛笔效果和草稿兼容。应用内检查走相同的触控路由与渲染代码，并验证键盘事件、菜单单键、文本编辑保护、帮助面板和实际画布面积。
+应用检查需要在已解锁、能够连接 macOS 桌面的会话中运行。`scripts/smoke.sh` 通过正常应用启动流程取得前台焦点，并核对新生成的结果，避免读到上次运行的文件。49 项模型检查覆盖旧版分笔、视窗变换、双指导航、低压力曲线、零压力速度辅助、缩放无关的速度、不同采样率下的平滑一致性、毛笔效果和草稿兼容。69 项应用检查走相同的触控路由与渲染代码，并验证键盘事件、菜单单键、文本编辑保护、帮助面板、画布面积和桌面标记生命周期。
 
 `artifacts/v0.4/` 存放结果 JSON、画板与桌面工具条、帮助、透明层、合成演示及导出图片。低压力示例从上到下为原始压力 0%、2%、10%，每条线交替慢速和快速；这些是合成输入。自动测试不读取或修改用户草稿，也不截取桌面内容，不能替代真实硬件触控、压力采样和手感测试。
 
-`scripts/package.sh` 将已构建应用、说明文档和验证制品打包到 `release/` 并生成 SHA-256。源码和测试制品保存在仓库，当前预览应用 ZIP 与验证 ZIP 存放在公开的 `downloads/` 目录；正式 Release 待最终前台回归完成后补充。
+`scripts/package.sh` 将已构建应用、说明文档和验证制品打包到 `release/` 并生成 SHA-256。源码和测试制品保存在仓库，应用 ZIP、验证 ZIP 与校验文件发布到 GitHub Release，并在 `downloads/` 目录保留备用下载。
 
 ## 技术边界
 
