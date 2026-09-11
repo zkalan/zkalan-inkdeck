@@ -26,12 +26,19 @@ final class CanvasView: NSView {
     private var latestFingers: [FingerSample] = []
     var inputHint: String {
         if engine.tool == .eraser { return "橡皮擦 · 移动手指擦除 · E 返回画笔 · Z 撤销" }
+        if drawingMode == .pressToDraw { return engine.preview ? "轻触定位 · 按下触控板落笔 · 空格暂停 · E 橡皮擦" : "按压画图 · 减力至释放停笔 · E 橡皮擦" }
         return drawingMode == .holdToDraw
             ? (spacePressed ? "正在画图 · 松开空格停笔 · 抬手断笔" : "预览落点 · 按住空格画图 · E 橡皮擦")
             : (spacePressed ? "预览落点 · 松开空格画图" : "轻触落笔 · 按住空格预览 · E 橡皮擦")
     }
     private func updateInputGate() {
-        engine.setPreview(engine.tool == .pen && (drawingMode == .holdToDraw ? !spacePressed : spacePressed))
+        let preview: Bool
+        switch drawingMode {
+        case .holdToDraw: preview = !spacePressed
+        case .touchToDraw: preview = spacePressed
+        case .pressToDraw: preview = currentPressure < 0.02 || spacePressed
+        }
+        engine.setPreview(engine.tool == .pen && preview)
         sessionMessage = inputHint
     }
     func setSpacePressed(_ pressed: Bool) {
@@ -41,7 +48,7 @@ final class CanvasView: NSView {
         if !engine.preview, latestFingers.count == 1, !navigationUntilLift {
             let before = engine.revision
             engine.frame(latestFingers.map { sample in
-                var s = sample; if !desktopSurface { s.point = viewport.worldPoint(at: s.point) }; return s
+                var s = sample; s.pressure = currentPressure; if !desktopSurface { s.point = viewport.worldPoint(at: s.point) }; return s
             })
             if before != engine.revision { onDocumentChange?() }
         } else { onDocumentChange?() }
@@ -221,7 +228,7 @@ final class CanvasView: NSView {
             if fingers.count >= 2 { engine.discardGesturePrelude(maxLength: 0.012); currentPressure = 0 }
             engine.frame(fingers, ended: ended)
             rawPointer = fingers.count == 1 && !engine.blockedUntilLift ? fingers.first?.point : nil
-            if fingers.isEmpty { currentPressure = 0 }
+            if fingers.isEmpty { currentPressure = 0; updateInputGate() }
             changed()
             if engine.revision != oldRevision { onDocumentChange?() }
             return
@@ -255,7 +262,7 @@ final class CanvasView: NSView {
                 var result = sample; result.point = viewport.worldPoint(at: sample.point); return result
             }
             engine.frame(fingers.map(world), ended: ended.map(world))
-            if fingers.isEmpty { currentPressure = 0 }
+            if fingers.isEmpty { currentPressure = 0; updateInputGate() }
             sessionMessage = inputHint
         }
         changed()
@@ -265,14 +272,25 @@ final class CanvasView: NSView {
     override func touchesMoved(with event: NSEvent) { receive(event) }
     override func touchesEnded(with event: NSEvent) { receive(event) }
     override func touchesCancelled(with event: NSEvent) {
-        engine.cancelContacts(); spacePressed = false; latestFingers = []; updateInputGate(); contactCount = 0; resetNavigation(); changed(); onDocumentChange?()
+        engine.cancelContacts(); spacePressed = false; latestFingers = []; contactCount = 0; resetNavigation(); updateInputGate(); changed(); onDocumentChange?()
     }
     override func pressureChange(with event: NSEvent) {
         guard isWriting else { return }
         pressureEventCount += 1
-        guard contactCount == 1, !navigationUntilLift else { currentPressure = 0; changed(); return }
-        currentPressure = event.stage == 0 ? 0 : min(1, max(0, Double(event.pressure)))
-        engine.updatePressure(currentPressure, timestamp: event.timestamp)
+        guard contactCount == 1, !navigationUntilLift else { currentPressure = 0; updateInputGate(); changed(); return }
+        processPressure(Double(event.pressure), stage: event.stage, timestamp: event.timestamp)
+    }
+    // The adapter and integration checks use the same pressure gating path.
+    func processPressure(_ value: Double, stage: Int, timestamp: Double) {
+        guard isWriting, contactCount == 1, !navigationUntilLift else { return }
+        currentPressure = stage == 0 || !value.isFinite ? 0 : min(1, max(0, value))
+        let wasPreview = engine.preview
+        updateInputGate()
+        if drawingMode == .pressToDraw, wasPreview, !engine.preview, let latest = latestFingers.first {
+            var sample = latest; sample.pressure = currentPressure; sample.timestamp = timestamp
+            if !desktopSurface { sample.point = viewport.worldPoint(at: sample.point) }
+            engine.frame([sample])
+        } else { engine.updatePressure(currentPressure, timestamp: timestamp) }
         changed(); onDocumentChange?()
     }
     private func resetNavigation() {

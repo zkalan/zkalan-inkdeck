@@ -46,7 +46,13 @@ struct InkColor: RawRepresentable, Codable, Equatable, Hashable, CaseIterable {
     }
 }
 
-enum DrawingMode: String, Codable { case holdToDraw, touchToDraw }
+enum DrawingMode: String, Codable, CaseIterable {
+    case holdToDraw, touchToDraw, pressToDraw
+    var next: DrawingMode {
+        let values = Self.allCases
+        return values[(values.firstIndex(of: self)! + 1) % values.count]
+    }
+}
 enum InkTool { case pen, eraser }
 
 struct RecentInkColors: Codable {

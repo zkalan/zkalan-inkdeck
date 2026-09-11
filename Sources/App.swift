@@ -217,9 +217,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         handButton.font = .systemFont(ofSize: 11)
         handButton.toolTip = "拖动画布；书写时可直接双指移动"
         zoomLabel.alignment = .center; zoomLabel.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        drawingModeControl.addItems(withTitles: ["按住空格画图", "轻触连续书写"])
+        drawingModeControl.addItems(withTitles: ["按住空格画图", "轻触连续书写", "按压落笔"])
         drawingModeControl.target = self; drawingModeControl.action = #selector(changeDrawingMode(_:))
-        drawingModeControl.controlSize = .small; drawingModeControl.toolTip = "M 切换输入方式 · 两种模式均使用绝对位置"
+        drawingModeControl.controlSize = .small; drawingModeControl.toolTip = "M 切换三种输入方式 · 均使用绝对位置；按压模式需要 Force Touch"
         eraserButton.target = self; eraserButton.action = #selector(toggleEraser)
         eraserButton.bezelStyle = .rounded; eraserButton.controlSize = .small; eraserButton.setButtonType(.toggle)
         eraserButton.toolTip = "E 切换橡皮擦 · 移动手指即可局部擦除 · Z 撤销"
@@ -266,7 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let stack = NSStackView(views: [label("快捷键", size: 16, weight: .semibold), keys,
             label("直接按单键即可，输入文件名时不会触发。\n常用的 Mac 组合键也兼容。", size: 11, color: .secondaryLabelColor),
             label("定位与落笔", size: 13, weight: .semibold),
-            label("默认轻触只预览，按住空格画图，松开停笔。连续书写模式中轻触就写，按住空格预览。橡皮擦模式直接移动擦除，再按 E 返回画笔。轻触增强按速度辅助粗细，按压叠加真实压力。", size: 12),
+            label("默认轻触只预览，按住空格画图，松开停笔。连续书写模式中轻触就写，按住空格预览。按压落笔模式需按下 Force Touch 触控板，空格暂停。橡皮擦直接移动擦除，E 返回画笔。", size: 12),
             label("双指移动 / 张合可平移和缩放；两指全部抬起后，继续单指书写。", size: 11, color: .secondaryLabelColor),
             label("桌面标记", size: 13, weight: .semibold),
             label("按 F 进入透明标记；Enter 暂停并操作桌面，点「继续标记」恢复，Esc 退出。也可从系统菜单栏画笔图标进入。", size: 12),
@@ -313,7 +313,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let previewItem = NSMenuItem(title: "空格：默认按住画图；连续书写时按住预览", action: nil, keyEquivalent: "")
         previewItem.isEnabled = false; writing.addItem(previewItem)
         writing.addItem(.separator())
-        for (title, action, key) in [("切换橡皮擦", #selector(toggleEraser), "e"), ("调色盘…", #selector(showPalette), "k"), ("切换：按住画图 / 连续书写", #selector(toggleDrawingMode), "m")] {
+        for (title, action, key) in [("切换橡皮擦", #selector(toggleEraser), "e"), ("调色盘…", #selector(showPalette), "k"), ("切换输入方式（空格 / 轻触 / 按压）", #selector(toggleDrawingMode), "m")] {
             let item = writing.addItem(withTitle: title, action: action, keyEquivalent: key)
             item.target = self; item.keyEquivalentModifierMask = []
         }
@@ -369,7 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         handButton.state = canvas.handTool ? .on : .off
         colors.selected = canvas.engine.color
         eraserButton.state = canvas.engine.tool == .eraser ? .on : .off
-        drawingModeControl.selectItem(at: canvas.drawingMode == .holdToDraw ? 0 : 1)
+        drawingModeControl.selectItem(at: DrawingMode.allCases.firstIndex(of: canvas.drawingMode)!)
     }
     @objc func toggleWriting() {
         if desktop.isVisible { desktop.toggleInteraction(); return }
@@ -393,11 +393,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     @objc func changeEraserSize(_ sender: NSSlider) { canvas.engine.finish(); canvas.eraserDiameter = sender.doubleValue; canvas.changed() }
     @objc func changeDrawingMode(_ sender: NSPopUpButton) {
-        preferences.mode = sender.indexOfSelectedItem == 0 ? .holdToDraw : .touchToDraw
+        preferences.mode = DrawingMode.allCases[sender.indexOfSelectedItem]
         canvas.drawingMode = preferences.mode; desktop.canvas.drawingMode = preferences.mode
     }
     @objc func toggleDrawingMode() {
-        preferences.mode = preferences.mode == .holdToDraw ? .touchToDraw : .holdToDraw
+        preferences.mode = preferences.mode.next
         canvas.drawingMode = preferences.mode; desktop.canvas.drawingMode = preferences.mode
     }
     @objc func changeWidth(_ sender: NSSlider) { canvas.engine.finish(); canvas.engine.width = sender.doubleValue / 1000; widthLabel.stringValue = String(format: "%.1f", sender.doubleValue) }

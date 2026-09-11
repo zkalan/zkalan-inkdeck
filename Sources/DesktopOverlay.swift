@@ -86,7 +86,7 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
         modeButton.bezelColor = InkColor.green.nsColor
         colors.onPick = { [weak self] in self?.showPalette() }
         colors.onSelect = { [weak self] color in self?.selectColor(color) }
-        drawingModeControl.addItems(withTitles: ["按住空格画图", "轻触连续书写"])
+        drawingModeControl.addItems(withTitles: ["按住空格画图", "轻触连续书写", "按压落笔"])
         drawingModeControl.controlSize = .small; drawingModeControl.target = self
         drawingModeControl.action = #selector(changeDrawingMode(_:))
         drawingModeControl.toolTip = "M 切换输入方式"
@@ -117,7 +117,7 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
             stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -7)
         ])
         let controller = NSViewController()
-        let text = NSTextField(wrappingLabelWithString: "桌面标记 · 单键操作\n\nEnter　暂停标记，操作下面的软件\nZ / Y　撤销 / 重做\nC　清空标记（会先确认）\n按住空格　画图（默认模式）\nE　切换橡皮擦，直接移动擦除\nK　调色盘　M　切换输入方式\nF / Esc　退出桌面标记\nH　打开 / 收起本说明\n\n默认松开空格只预览；连续书写模式中按住空格预览。\n暂停后点「继续标记」恢复；工具条可拖动。\n使用菜单栏的画笔图标，可从其他应用进入。\n触控板四角对应当前屏幕四角；「换屏」切换显示器。桌面模式固定视图，双指暂停落笔。\n\n标记停留在屏幕位置，翻页或移动窗口后可清空重画。屏幕共享时请选择整个屏幕。")
+        let text = NSTextField(wrappingLabelWithString: "桌面标记 · 单键操作\n\nEnter　暂停标记，操作下面的软件\nZ / Y　撤销 / 重做\nC　清空标记（会先确认）\n按住空格　画图（默认模式）\nE　切换橡皮擦，直接移动擦除\nK　调色盘　M　切换输入方式\nF / Esc　退出桌面标记\nH　打开 / 收起本说明\n\n默认松开空格只预览；连续书写时空格预览。按压落笔模式需按下 Force Touch 触控板，空格暂停。\n暂停后点「继续标记」恢复；工具条可拖动。\n使用菜单栏的画笔图标，可从其他应用进入。\n触控板四角对应当前屏幕四角；「换屏」切换显示器。桌面模式固定视图，双指暂停落笔。\n\n标记停留在屏幕位置，翻页或移动窗口后可清空重画。屏幕共享时请选择整个屏幕。")
         text.font = .systemFont(ofSize: 12); text.preferredMaxLayoutWidth = 288
         let helpRoot = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 420))
         helpRoot.wantsLayer = true; helpRoot.layer?.backgroundColor = root.layer?.backgroundColor
@@ -179,8 +179,11 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let self, self.isVisible, !self.overlay.ignoresMouseEvents else { return }
                 if !self.canvas.isWriting && !self.canvas.startWriting() { self.pause() }
+                self.overlay.displayIfNeeded()
             }
         }
+        // Paint the touch-routing backing before the next contact can begin.
+        overlay.displayIfNeeded()
         refresh()
     }
 
@@ -257,11 +260,11 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
     }
     @objc private func changeEraserSize(_ sender: NSSlider) { canvas.engine.finish(); canvas.eraserDiameter = sender.doubleValue; canvas.changed() }
     @objc private func changeDrawingMode(_ sender: NSPopUpButton) {
-        preferences.mode = sender.indexOfSelectedItem == 0 ? .holdToDraw : .touchToDraw
+        preferences.mode = DrawingMode.allCases[sender.indexOfSelectedItem]
         canvas.drawingMode = preferences.mode
     }
     @objc private func toggleDrawingMode() {
-        preferences.mode = preferences.mode == .holdToDraw ? .touchToDraw : .holdToDraw
+        preferences.mode = preferences.mode.next
         canvas.drawingMode = preferences.mode
     }
     @objc private func changeBrush(_ sender: NSSegmentedControl) { canvas.engine.finish(); canvas.engine.brush = sender.selectedSegment == 0 ? .pen : .brush }
@@ -286,7 +289,7 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
     private func refresh() {
         colors.selected = canvas.engine.color
         eraserButton.state = canvas.engine.tool == .eraser ? .on : .off
-        drawingModeControl.selectItem(at: canvas.drawingMode == .holdToDraw ? 0 : 1)
+        drawingModeControl.selectItem(at: DrawingMode.allCases.firstIndex(of: canvas.drawingMode)!)
         modeButton.title = canvas.isWriting ? "操作桌面 ↩" : "继续标记"
         undoButton.isEnabled = canvas.engine.canUndo; redoButton.isEnabled = canvas.engine.canRedo
         hint.stringValue = saveError ?? (canvas.isWriting

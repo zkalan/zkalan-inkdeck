@@ -60,6 +60,22 @@ extension AppDelegate {
             _ = route(key(49)); touch(506, 0.2, 0.8); touch(nil)
             checks[prefix + "OptionalModeSpacePreviews"] = surface.engine.preview && surface.engine.document.strokes.count == 5
             _ = route(key(49, .keyUp)); _ = route(key(46))
+            touch(509, 0.65, 0.9)
+            let beforePressure = surface.engine.document.strokes.count
+            checks[prefix + "PressureModeInitiallyPreviews"] = surface.drawingMode == .pressToDraw && surface.engine.preview
+            surface.processPressure(0.01, stage: 1, timestamp: time + 0.001)
+            checks[prefix + "BelowPressureThresholdNoInk"] = surface.engine.document.strokes.count == beforePressure
+            surface.processPressure(0.20, stage: 1, timestamp: time + 0.002)
+            checks[prefix + "PressureStartsAtPreviewPoint"] = surface.engine.document.strokes.last?.points.first == surface.viewport.worldPoint(at: InkPoint(0.65, 0.9))
+            touch(509, 0.75, 0.9)
+            surface.processPressure(0, stage: 0, timestamp: time + 0.003)
+            touch(509, 0.85, 0.9)
+            checks[prefix + "PressureReleaseStopsInk"] = surface.engine.preview && surface.engine.document.strokes.count == beforePressure + 1 && surface.engine.document.strokes.last?.points.last == surface.viewport.worldPoint(at: InkPoint(0.75, 0.9))
+            _ = route(key(49)); surface.processPressure(0.5, stage: 1, timestamp: time + 0.004)
+            checks[prefix + "PressureSpacePausesInk"] = surface.engine.preview && surface.engine.document.strokes.count == beforePressure + 1
+            surface.processPressure(0, stage: 0, timestamp: time + 0.005)
+            touch(nil); _ = route(key(49, .keyUp)); _ = route(key(46))
+            checks[prefix + "ModeCycleReturnsToDefault"] = surface.drawingMode == .holdToDraw && surface.engine.preview
             let beforePalette = surface.engine.document.strokes.count
             _ = route(key(40))
             checks[prefix + "KOpensPaletteReleasesCursor"] = NSColorPanel.shared.isVisible && !surface.isWriting && !surface.cursorHidden && !surface.cursorDetached
