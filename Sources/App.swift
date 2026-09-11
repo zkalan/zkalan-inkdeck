@@ -37,7 +37,12 @@ final class PadMapView: NSView {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation {
     let canvas = CanvasView(frame: .zero)
-    lazy var desktop = DesktopOverlay(smokeMode: smokeMode)
+    lazy var preferences = InkPreferences(persistent: !smokeMode)
+    let palettePanel = InkPalette()
+    lazy var colors = ColorControls(preferences: preferences)
+    let drawingModeControl = NSPopUpButton(frame: .zero, pullsDown: false)
+    let eraserButton = NSButton(title: "橡皮擦 E", target: nil, action: nil)
+    lazy var desktop = DesktopOverlay(smokeMode: smokeMode, preferences: preferences, palette: palettePanel)
     var window: NSWindow!
     var statusItem: NSStatusItem?
     private var workspaceObserver: NSObjectProtocol?
@@ -86,11 +91,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         buildMenu()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 830), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Zkalan InkDeck"
-        window.subtitle = "0.4 · 桌面透明标记"
+        window.subtitle = "0.5 · 示意图与橡皮擦"
         window.minSize = NSSize(width: 1000, height: 640)
         window.isReleasedWhenClosed = false
         window.delegate = self
         buildInterface()
+        canvas.drawingMode = preferences.mode
+        canvas.engine.onColorUsed = { [weak self] color in self?.preferences.record(color) }
         if !smokeMode { restore() }
         canvas.onChange = { [weak self] in self?.refresh() }
         canvas.onDocumentChange = { [weak self] in self?.scheduleSave() }
@@ -111,6 +118,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func handleKeyboard(_ event: NSEvent) -> NSEvent? {
+        // Always release the clutch, including when modifiers change before key-up.
+        if event.keyCode == 49 && event.type == .keyUp && canvas.spacePressed {
+            canvas.setSpacePressed(false); return nil
+        }
         if desktop.isVisible { return desktop.handleKeyboard(event) }
         if helpPopover.isShown && event.type == .keyDown && event.modifierFlags.intersection([.command, .control, .option]).isEmpty && (event.keyCode == 4 || event.keyCode == 53) {
             helpPopover.close(); return nil
@@ -119,12 +130,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
               window.attachedSheet == nil, !(window.firstResponder is NSTextView),
               !event.modifierFlags.contains(.control), !event.modifierFlags.contains(.option) else { return event }
         if event.keyCode == 49 && canvas.isWriting && !event.modifierFlags.contains(.command) {
-            canvas.setPreview(event.type == .keyDown); return nil
+            if !event.isARepeat { canvas.setSpacePressed(event.type == .keyDown) }; return nil
         }
         guard event.type == .keyDown else { return event }
         // Keep standard system shortcuts such as Command-H available to macOS.
         if event.modifierFlags.contains(.command), ![36, 76, 6, 16, 24, 27, 29, 25, 1].contains(event.keyCode) { return event }
-        if event.isARepeat && [36, 76, 1, 4, 3].contains(event.keyCode) { return nil }
+        if event.isARepeat && [36, 76, 1, 4, 3, 14, 40, 46].contains(event.keyCode) { return nil }
         switch event.keyCode {
         case 36, 76: toggleWriting()
         case 53: endWriting()
@@ -137,6 +148,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case 1: exportPNG()
         case 4: showHelp()
         case 3: toggleDesktop()
+        case 14: toggleEraser()
+        case 40: showPalette()
+        case 46: toggleDrawingMode()
         default: return event
         }
         return nil
@@ -153,17 +167,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         startButton.font = .systemFont(ofSize: 12, weight: .semibold)
         startButton.toolTip = "开始或结束书写 · Enter · Esc 退出"
 
-        let palette = NSSegmentedControl(labels: ["", "", "", ""], trackingMode: .selectOne, target: self, action: #selector(changeColor(_:)))
-        palette.selectedSegment = 0; palette.segmentStyle = .rounded
-        palette.setAccessibilityLabel("笔迹颜色")
-        for (index, color) in InkColor.allCases.enumerated() {
-            let image = NSImage(size: NSSize(width: 13, height: 13), flipped: false) { rect in
-                color.nsColor.setFill(); NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill(); return true
-            }
-            palette.setImage(image, forSegment: index)
-            palette.setWidth(25, forSegment: index)
-            palette.setToolTip(color.title, forSegment: index)
-        }
+        colors.onPick = { [weak self] in self?.showPalette() }
+        colors.onSelect = { [weak self] color in self?.selectColor(color) }
         let brush = NSSegmentedControl(labels: ["普通笔", "毛笔"], trackingMode: .selectOne, target: self, action: #selector(changeBrush(_:)))
         brush.selectedSegment = 0; brush.segmentStyle = .rounded; brush.controlSize = .small
         brush.setAccessibilityLabel("笔刷类型")
@@ -186,7 +191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         exportButton.toolTip = "导出整幅作品 · S"
         helpButton.toolTip = "快捷键、输入方式与触控信息 · H · 菜单「帮助」中也可查看"
         desktopButton.toolTip = "在当前屏幕上透明标记 · F · 也可从系统菜单栏画笔图标进入"
-        let toolbar = NSStackView(views: [startButton, palette, brush, label("笔宽", size: 11), width, widthLabel,
+        let toolbar = NSStackView(views: [startButton, colors, brush, label("笔宽", size: 11), width, widthLabel,
             inputMode, NSView(), desktopButton, undoButton, redoButton, clearButton, exportButton, helpButton])
         toolbar.orientation = .horizontal; toolbar.alignment = .centerY; toolbar.spacing = 6
 
@@ -212,11 +217,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         handButton.font = .systemFont(ofSize: 11)
         handButton.toolTip = "拖动画布；书写时可直接双指移动"
         zoomLabel.alignment = .center; zoomLabel.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        let hint = label("双指移动 / 缩放 · 空格预览 · Z 撤销", size: 11, color: .secondaryLabelColor)
-        hint.maximumNumberOfLines = 1; hint.lineBreakMode = .byTruncatingTail
-        hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        drawingModeControl.addItems(withTitles: ["按住空格画图", "轻触连续书写"])
+        drawingModeControl.target = self; drawingModeControl.action = #selector(changeDrawingMode(_:))
+        drawingModeControl.controlSize = .small; drawingModeControl.toolTip = "M 切换输入方式 · 两种模式均使用绝对位置"
+        eraserButton.target = self; eraserButton.action = #selector(toggleEraser)
+        eraserButton.bezelStyle = .rounded; eraserButton.controlSize = .small; eraserButton.setButtonType(.toggle)
+        eraserButton.toolTip = "E 切换橡皮擦 · 移动手指即可局部擦除 · Z 撤销"
+        let eraserSize = NSSlider(value: 26, minValue: 6, maxValue: 80, target: self, action: #selector(changeEraserSize(_:)))
+        eraserSize.controlSize = .small; eraserSize.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        eraserSize.setAccessibilityLabel("橡皮擦直径"); eraserSize.toolTip = "橡皮擦大小（屏幕点）"
         let navigationBar = NSStackView(views: [label("灵敏度", size: 11), sensitivity, grid, pressureMeter, pressureLabel,
-            NSView(), hint, NSView(), handButton, button("−", #selector(zoomOut)), zoomLabel,
+            NSView(), drawingModeControl, eraserButton, eraserSize, NSView(), handButton, button("−", #selector(zoomOut)), zoomLabel,
             button("+", #selector(zoomIn)), button("原位", #selector(resetView)), button("全部", #selector(fitView))])
         navigationBar.orientation = .horizontal; navigationBar.alignment = .centerY; navigationBar.spacing = 6
 
@@ -246,16 +257,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func buildHelpPanel() {
         let content = NSViewController()
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 570))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 640))
         root.wantsLayer = true
         root.layer?.backgroundColor = NSColor(srgbRed: 0.96, green: 0.96, blue: 0.95, alpha: 1).cgColor
         root.widthAnchor.constraint(equalToConstant: 320).isActive = true
         content.view = root
-        let keys = label("Enter            开始 / 结束书写\nEsc              退出书写\n按住空格      预览落点\nZ                  撤销笔画\nY                  重做笔画\n+（=）/ −    放大 / 缩小\n0                  回到原位\n9                  显示全部笔迹\nS                  导出 PNG\nF                  进入 / 退出桌面标记\nH                  打开 / 收起帮助", size: 12)
+        let keys = label("Enter            开始 / 结束书写\nEsc              退出书写\n按住空格      画图（默认模式）\nE                  切换橡皮擦\nK                  调色盘\nM                  切换输入方式\nZ                  撤销笔画\nY                  重做笔画\n+（=）/ −    放大 / 缩小\n0                  回到原位\n9                  显示全部笔迹\nS                  导出 PNG\nF                  进入 / 退出桌面标记\nH                  打开 / 收起帮助", size: 12)
         let stack = NSStackView(views: [label("快捷键", size: 16, weight: .semibold), keys,
             label("直接按单键即可，输入文件名时不会触发。\n常用的 Mac 组合键也兼容。", size: 11, color: .secondaryLabelColor),
-            label("轻触增强", size: 13, weight: .semibold),
-            label("轻触时按移动速度辅助变化，按压后叠加真实压力。想只用硬件压力，可切换到「纯压感」。灵敏度越高，较小的按压变化越明显。", size: 12),
+            label("定位与落笔", size: 13, weight: .semibold),
+            label("默认轻触只预览，按住空格画图，松开停笔。连续书写模式中轻触就写，按住空格预览。橡皮擦模式直接移动擦除，再按 E 返回画笔。轻触增强按速度辅助粗细，按压叠加真实压力。", size: 12),
             label("双指移动 / 张合可平移和缩放；两指全部抬起后，继续单指书写。", size: 11, color: .secondaryLabelColor),
             label("桌面标记", size: 13, weight: .semibold),
             label("按 F 进入透明标记；Enter 暂停并操作桌面，点「继续标记」恢复，Esc 退出。也可从系统菜单栏画笔图标进入。", size: 12),
@@ -275,7 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         ])
         helpPopover.contentViewController = content; helpPopover.behavior = .transient
         helpPopover.animates = false
-        helpPopover.contentSize = NSSize(width: 320, height: 570)
+        helpPopover.contentSize = NSSize(width: 320, height: 640)
     }
 
     func buildMenu() {
@@ -299,9 +310,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         toggleItem.target = self; toggleItem.keyEquivalentModifierMask = []
         let exitWriting = writing.addItem(withTitle: "退出书写", action: #selector(endWriting), keyEquivalent: "\u{1b}")
         exitWriting.target = self; exitWriting.keyEquivalentModifierMask = []
-        let previewItem = NSMenuItem(title: "预览落点：按住空格", action: nil, keyEquivalent: "")
+        let previewItem = NSMenuItem(title: "空格：默认按住画图；连续书写时按住预览", action: nil, keyEquivalent: "")
         previewItem.isEnabled = false; writing.addItem(previewItem)
         writing.addItem(.separator())
+        for (title, action, key) in [("切换橡皮擦", #selector(toggleEraser), "e"), ("调色盘…", #selector(showPalette), "k"), ("切换：按住画图 / 连续书写", #selector(toggleDrawingMode), "m")] {
+            let item = writing.addItem(withTitle: title, action: action, keyEquivalent: key)
+            item.target = self; item.keyEquivalentModifierMask = []
+        }
         let desktopItem = writing.addItem(withTitle: "进入 / 退出桌面标记", action: #selector(toggleDesktop), keyEquivalent: "f")
         desktopItem.target = self; desktopItem.keyEquivalentModifierMask = []
         let viewItem = NSMenuItem(); viewItem.title = "视图"; main.addItem(viewItem)
@@ -318,11 +333,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if palettePanel.isOpen && NSColorPanel.shared.isVisible { return false }
         if desktop.isVisible {
             guard desktop.overlay.attachedSheet == nil, NSApp.modalWindow == nil else { return false }
             if menuItem.action == #selector(undoStroke) { return desktop.canvas.engine.canUndo }
             if menuItem.action == #selector(redoStroke) { return desktop.canvas.engine.canRedo }
-            return [#selector(toggleDesktop), #selector(resumeDesktop), #selector(showDrawingWindow), #selector(toggleWriting), #selector(endWriting), #selector(clearPage), #selector(showHelp)].contains(menuItem.action)
+            return [#selector(toggleDesktop), #selector(resumeDesktop), #selector(showDrawingWindow), #selector(toggleWriting), #selector(endWriting), #selector(clearPage), #selector(showHelp), #selector(toggleEraser), #selector(showPalette), #selector(toggleDrawingMode)].contains(menuItem.action)
         }
         if [#selector(toggleDesktop), #selector(showDrawingWindow)].contains(menuItem.action) { return window?.attachedSheet == nil && NSApp.modalWindow == nil }
         if menuItem.action == #selector(resumeDesktop) { return false }
@@ -334,7 +350,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func refresh() {
         startButton.title = canvas.isWriting ? "结束书写  Esc" : "开始书写  ↩"
-        stateLabel.stringValue = canvas.isWriting ? (canvas.isNavigating ? "↔  移动与缩放" : canvas.engine.preview ? "◌  预览落点" : "●  正在书写") : canvas.handTool ? "↔  拖动画布" : "○  准备就绪"
+        stateLabel.stringValue = canvas.isWriting ? (canvas.isNavigating ? "↔  移动与缩放" : canvas.engine.tool == .eraser ? "◯  橡皮擦" : canvas.engine.preview ? "◌  预览落点" : "●  正在书写") : canvas.handTool ? "↔  拖动画布" : "○  准备就绪"
         stateLabel.textColor = canvas.isWriting ? InkColor.green.nsColor : .secondaryLabelColor
         messageLabel.stringValue = canvas.handTool ? "按住并拖动画布 · 点击开始书写后恢复落笔" : canvas.sessionMessage
         if Date() < noticeUntil { messageLabel.stringValue = noticeText }
@@ -351,12 +367,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         pressureMeter.doubleValue = canvas.currentPressure * 100
         pressureLabel.stringValue = String(format: "原始力度 %.0f%%", canvas.currentPressure * 100)
         handButton.state = canvas.handTool ? .on : .off
+        colors.selected = canvas.engine.color
+        eraserButton.state = canvas.engine.tool == .eraser ? .on : .off
+        drawingModeControl.selectItem(at: canvas.drawingMode == .holdToDraw ? 0 : 1)
     }
     @objc func toggleWriting() {
         if desktop.isVisible { desktop.toggleInteraction(); return }
         if canvas.isWriting { canvas.stopWriting() } else { canvas.startWriting() }
     }
-    @objc func changeColor(_ sender: NSSegmentedControl) { canvas.engine.finish(); canvas.engine.color = InkColor.allCases[sender.selectedSegment] }
+    func selectColor(_ color: InkColor) {
+        canvas.engine.finish(); canvas.engine.color = color; canvas.changed()
+    }
+    @objc func showPalette() {
+        if desktop.isVisible { desktop.showPalette(); return }
+        canvas.stopWriting()
+        palettePanel.show(color: canvas.engine.color, preferences: preferences, onSelect: { [weak self] in self?.selectColor($0) }, onDone: { [weak self] in
+            guard let self else { return }
+            self.window.makeKeyAndOrderFront(nil); self.canvas.startWriting()
+        })
+    }
+    @objc func toggleEraser() {
+        if desktop.isVisible { desktop.toggleEraser(); return }
+        canvas.toggleEraser()
+        if !canvas.isWriting { canvas.startWriting() }
+    }
+    @objc func changeEraserSize(_ sender: NSSlider) { canvas.engine.finish(); canvas.eraserDiameter = sender.doubleValue; canvas.changed() }
+    @objc func changeDrawingMode(_ sender: NSPopUpButton) {
+        preferences.mode = sender.indexOfSelectedItem == 0 ? .holdToDraw : .touchToDraw
+        canvas.drawingMode = preferences.mode; desktop.canvas.drawingMode = preferences.mode
+    }
+    @objc func toggleDrawingMode() {
+        preferences.mode = preferences.mode == .holdToDraw ? .touchToDraw : .holdToDraw
+        canvas.drawingMode = preferences.mode; desktop.canvas.drawingMode = preferences.mode
+    }
     @objc func changeWidth(_ sender: NSSlider) { canvas.engine.finish(); canvas.engine.width = sender.doubleValue / 1000; widthLabel.stringValue = String(format: "%.1f", sender.doubleValue) }
     @objc func changeBrush(_ sender: NSSegmentedControl) { canvas.engine.finish(); canvas.engine.brush = sender.selectedSegment == 0 ? .pen : .brush }
     @objc func changeInputMode(_ sender: NSPopUpButton) {
@@ -425,7 +468,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     @objc func showAbout() {
         canvas.stopWriting()
-        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Zkalan InkDeck", .applicationVersion: "0.4 · 桌面透明标记", .credits: NSAttributedString(string: "桌面标记 · 轻触增强 · 单键操作\n画板与桌面笔迹分别保存在本机。")])
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Zkalan InkDeck", .applicationVersion: "0.5 · 示意图与橡皮擦", .credits: NSAttributedString(string: "桌面标记 · 轻触增强 · 单键操作\n画板与桌面笔迹分别保存在本机。")])
     }
     func scheduleSave() {
         guard !smokeMode else { return }
@@ -453,7 +496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         do {
             var doc = try JSONDecoder().decode(InkDocument.self, from: Data(contentsOf: sourceURL))
             guard doc.isValid else { throw CocoaError(.fileReadCorruptFile) }
-            doc.formatVersion = 2
+            doc.formatVersion = 3
             for index in doc.strokes.indices where doc.strokes[index].id == nil { doc.strokes[index].id = UUID() }
             canvas.engine.document = doc
             if sourceURL == legacyURL { saveLabel.stringValue = "已读取旧版草稿，原文件保留" }
@@ -477,7 +520,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     // The menu bar entry remains available when the drawing window is hidden or closed.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationWillTerminate(_ notification: Notification) {
-        canvas.stopWriting(); saveDraft(); desktop.finish(restoreMainWindow: false)
+        palettePanel.close(); canvas.stopWriting(); saveDraft(); desktop.finish(restoreMainWindow: false)
         if let keyboardMonitor { NSEvent.removeMonitor(keyboardMonitor) }
         if let workspaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver) }
     }
@@ -504,6 +547,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     @objc func resumeDesktop() { if desktop.isVisible { desktop.resume() } }
     @objc func showDrawingWindow() {
+        palettePanel.close(); canvas.drawingMode = preferences.mode
         if desktop.isVisible { desktop.finish(restoreMainWindow: false) }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil); window.makeFirstResponder(canvas)
@@ -512,6 +556,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func runSmokeTest() {
         let output = ProcessInfo.processInfo.environment["TRACKPAD_INK_ARTIFACTS"] ?? NSTemporaryDirectory()
         var results: [String: Any] = [:]
+        canvas.drawingMode = .touchToDraw; preferences.mode = .touchToDraw
+        // LaunchServices activation is asynchronous; wait for this test window before capture.
+        let activationDeadline = Date().addingTimeInterval(3)
+        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        while (!NSApp.isActive || !window.isKeyWindow) && Date() < activationDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        results["testWindowHasForeground"] = NSApp.isActive && window.isKeyWindow
         let cursorBefore = CGEvent(source: nil)?.location
         results["enteredWritingMode"] = canvas.startWriting()
         results["cursorHideAccepted"] = canvas.cursorHidden
@@ -541,8 +593,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 windowNumber: window.windowNumber, context: nil, characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: code)!
         }
         let undoItem = NSApp.mainMenu!.items.flatMap { $0.submenu?.items ?? [] }.first { $0.action == #selector(undoStroke) }!
-        let singleKeys: Set<String> = ["z", "y", "s", "\r", "\u{1b}", "=", "-", "0", "9", "h", "f"]
-        let shortcutItems = NSApp.mainMenu!.items.flatMap { $0.submenu?.items ?? [] }.filter { singleKeys.contains($0.keyEquivalent) }
+        let singleKeys: Set<String> = ["z", "y", "s", "\r", "\u{1b}", "=", "-", "0", "9", "h", "f", "e", "k", "m"]
+        let shortcutItems = NSApp.mainMenu!.items.flatMap { $0.submenu?.items ?? [] }.filter { singleKeys.contains($0.keyEquivalent) && ($0.target as AnyObject?) === self }
+        results["shortcutMenuEntries"] = shortcutItems.map { $0.title + ":" + $0.keyEquivalent }
         results["shortcutsDiscoverableInMenus"] = shortcutItems.count == singleKeys.count && shortcutItems.allSatisfy { $0.keyEquivalentModifierMask.isEmpty }
         results["plainZUndoOutsideWriting"] = handleKeyboard(key(6, "z")) == nil && canvas.engine.document.strokes.isEmpty
         results["plainYRedoOutsideWriting"] = handleKeyboard(key(16, "y")) == nil && canvas.engine.document.strokes.count == 1
@@ -692,6 +745,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         results["desktopExitRestoresBoardWindow"] = window.isVisible && !desktop.isVisible
         results["desktopDoesNotChangeBoard"] = boardBeforeDesktop == (try! comparisonEncoder.encode(canvas.engine.document))
         results["desktopMenuBarEntryExists"] = statusItem?.menu?.items.contains { $0.action == #selector(toggleDesktop) } == true
+        results.merge(runFeatureChecks(output: output)) { _, value in value }
         let data = try! JSONSerialization.data(withJSONObject: results, options: [.prettyPrinted, .sortedKeys])
         try? data.write(to: URL(fileURLWithPath: output).appendingPathComponent("smoke-results.json"))
         print(String(data: data, encoding: .utf8)!)

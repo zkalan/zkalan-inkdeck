@@ -13,6 +13,10 @@ final class InkRenderer {
     private var cache: [String: CacheEntry] = [:]
 
     func draw(_ document: InkDocument, activeStroke: Int?, in context: CGContext) {
+        // Isolate ink so clearing reveals the paper/grid or the real desktop underneath.
+        context.saveGState()
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
+        defer { context.endTransparencyLayer(); context.restoreGState() }
         var liveKeys = Set<String>()
         for (index, stroke) in document.strokes.enumerated() {
             let key = stroke.id?.uuidString ?? "legacy-\(index)"
@@ -29,6 +33,7 @@ final class InkRenderer {
                 cache[key] = entry
             }
             guard !entry.path.isEmpty, context.boundingBoxOfClipPath.intersects(entry.path.boundingBoxOfPath) else { continue }
+            context.setBlendMode(stroke.eraser == true ? .clear : .normal)
             context.setFillColor(stroke.color.nsColor.cgColor)
             context.addPath(entry.path)
             context.fillPath()

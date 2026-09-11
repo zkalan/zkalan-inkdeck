@@ -18,6 +18,11 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
     var onExit: (() -> Void)?
     var onChange: (() -> Void)?
     private let smokeMode: Bool
+    private let preferences: InkPreferences
+    private let palette: InkPalette
+    private let colors: ColorControls
+    private let drawingModeControl = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let eraserButton = NSButton(title: "橡皮擦 E", target: nil, action: nil)
     private var screenID = ""
     private var documents: [String: InkDocument] = [:]
     private var saveTimer: Timer?
@@ -33,10 +38,13 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
             .appendingPathComponent("TrackpadInk/desktop-draft.json")
     }
 
-    init(smokeMode: Bool) {
-        self.smokeMode = smokeMode
+    init(smokeMode: Bool, preferences: InkPreferences, palette: InkPalette) {
+        self.smokeMode = smokeMode; self.preferences = preferences; self.palette = palette
+        colors = ColorControls(preferences: preferences)
         super.init()
         canvas.desktopSurface = true; canvas.showGrid = false
+        canvas.drawingMode = preferences.mode
+        canvas.engine.onColorUsed = { [weak preferences] color in preferences?.record(color) }
         canvas.engine.color = .coral; canvas.engine.width = 0.004
         canvas.setAccessibilityLabel("桌面透明标记画布")
         canvas.onChange = { [weak self] in self?.refresh() }
@@ -56,7 +64,7 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
         overlay.level = .floating; overlay.hidesOnDeactivate = false
         overlay.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications]
         overlay.delegate = self; overlay.contentView = canvas
-        toolbar = MarkingToolbar(contentRect: NSRect(x: 0, y: 0, width: 760, height: 72),
+        toolbar = MarkingToolbar(contentRect: NSRect(x: 0, y: 0, width: 860, height: 96),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         toolbar.title = "桌面标记工具"
         toolbar.isOpaque = false; toolbar.backgroundColor = .clear
@@ -76,19 +84,30 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
             b.target = self; b.action = action; b.bezelStyle = .rounded; b.controlSize = .small
         }
         modeButton.bezelColor = InkColor.green.nsColor
-        let colors = NSSegmentedControl(labels: ["红", "蓝", "绿", "黑"], trackingMode: .selectOne, target: self, action: #selector(changeColor(_:)))
-        colors.selectedSegment = 0; colors.controlSize = .small
+        colors.onPick = { [weak self] in self?.showPalette() }
+        colors.onSelect = { [weak self] color in self?.selectColor(color) }
+        drawingModeControl.addItems(withTitles: ["按住空格画图", "轻触连续书写"])
+        drawingModeControl.controlSize = .small; drawingModeControl.target = self
+        drawingModeControl.action = #selector(changeDrawingMode(_:))
+        drawingModeControl.toolTip = "M 切换输入方式"
+        eraserButton.bezelStyle = .rounded; eraserButton.controlSize = .small; eraserButton.setButtonType(.toggle)
+        eraserButton.target = self; eraserButton.action = #selector(toggleEraser)
+        eraserButton.toolTip = "E 切换 · 移动手指擦除 · Z 撤销"
+        let eraserSize = NSSlider(value: 26, minValue: 6, maxValue: 80, target: self, action: #selector(changeEraserSize(_:)))
+        eraserSize.controlSize = .small; eraserSize.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        eraserSize.setAccessibilityLabel("桌面橡皮擦直径")
         let brush = NSSegmentedControl(labels: ["笔", "毛笔"], trackingMode: .selectOne, target: self, action: #selector(changeBrush(_:)))
         brush.selectedSegment = 0; brush.controlSize = .small
         let width = NSSlider(value: 4, minValue: 1, maxValue: 14, target: self, action: #selector(changeWidth(_:)))
         width.controlSize = .small; width.widthAnchor.constraint(equalToConstant: 55).isActive = true
         width.setAccessibilityLabel("桌面标记笔宽")
-        let row = NSStackView(views: [modeButton, colors, brush, width, undoButton, redoButton,
-            button("清空 C", #selector(clearMarks)), button("换屏", #selector(nextScreen)), button("帮助 H", #selector(showHelp)), button("退出 Esc", #selector(exitMarking))])
+        let row = NSStackView(views: [modeButton, colors, brush, width, eraserButton, eraserSize, undoButton, redoButton, button("退出 Esc", #selector(exitMarking))])
         row.spacing = 5; row.alignment = .centerY
+        let second = NSStackView(views: [drawingModeControl, button("清空 C", #selector(clearMarks)), button("换屏", #selector(nextScreen)), button("帮助 H", #selector(showHelp))])
+        second.spacing = 5; second.alignment = .centerY
         hint.font = .systemFont(ofSize: 11); hint.textColor = .secondaryLabelColor
         hint.lineBreakMode = .byTruncatingTail; hint.maximumNumberOfLines = 1
-        let stack = NSStackView(views: [row, hint]); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 7
+        let stack = NSStackView(views: [row, second, hint]); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 9),
@@ -98,9 +117,9 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
             stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -7)
         ])
         let controller = NSViewController()
-        let text = NSTextField(wrappingLabelWithString: "桌面标记 · 单键操作\n\nEnter　暂停标记，操作下面的软件\nZ / Y　撤销 / 重做\nC　清空标记（会先确认）\n按住空格　只预览落点\nF / Esc　退出桌面标记\nH　打开 / 收起本说明\n\n暂停后点「继续标记」恢复；工具条可拖动。\n使用菜单栏的画笔图标，可从其他应用进入。\n触控板四角对应当前屏幕四角；「换屏」切换显示器。桌面模式固定视图，双指暂停落笔。\n\n标记停留在屏幕位置，翻页或移动窗口后可清空重画。屏幕共享时请选择整个屏幕。")
+        let text = NSTextField(wrappingLabelWithString: "桌面标记 · 单键操作\n\nEnter　暂停标记，操作下面的软件\nZ / Y　撤销 / 重做\nC　清空标记（会先确认）\n按住空格　画图（默认模式）\nE　切换橡皮擦，直接移动擦除\nK　调色盘　M　切换输入方式\nF / Esc　退出桌面标记\nH　打开 / 收起本说明\n\n默认松开空格只预览；连续书写模式中按住空格预览。\n暂停后点「继续标记」恢复；工具条可拖动。\n使用菜单栏的画笔图标，可从其他应用进入。\n触控板四角对应当前屏幕四角；「换屏」切换显示器。桌面模式固定视图，双指暂停落笔。\n\n标记停留在屏幕位置，翻页或移动窗口后可清空重画。屏幕共享时请选择整个屏幕。")
         text.font = .systemFont(ofSize: 12); text.preferredMaxLayoutWidth = 288
-        let helpRoot = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 350))
+        let helpRoot = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 420))
         helpRoot.wantsLayer = true; helpRoot.layer?.backgroundColor = root.layer?.backgroundColor
         helpRoot.widthAnchor.constraint(equalToConstant: 320).isActive = true
         text.translatesAutoresizingMaskIntoConstraints = false; helpRoot.addSubview(text)
@@ -112,6 +131,7 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
     func begin(on screen: NSScreen, settings: InkEngine, previous: NSRunningApplication?) {
         guard !isVisible else { resume(); return }
         previousApplication = previous
+        canvas.drawingMode = preferences.mode
         canvas.engine.pressureEnabled = settings.pressureEnabled
         canvas.engine.lightTouchAssistance = settings.lightTouchAssistance
         canvas.engine.pressureSensitivity = settings.pressureSensitivity
@@ -168,6 +188,7 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
         guard isVisible else { return }
         canvas.stopWriting()
         overlay.ignoresMouseEvents = true
+        overlay.displayIfNeeded()
         refresh(); save()
     }
 
@@ -182,19 +203,23 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
     func finish(restoreMainWindow: Bool = true) {
         guard isVisible else { return }
         isVisible = false
-        canvas.stopWriting(); help.close(); save()
+        palette.close(); canvas.stopWriting(); help.close(); save()
         overlay.ignoresMouseEvents = true; overlay.orderOut(nil); toolbar.orderOut(nil)
         if restoreMainWindow { onExit?() }
         onChange?()
     }
 
     func handleKeyboard(_ event: NSEvent) -> NSEvent? {
+        // Always release the clutch, including when modifiers change before key-up.
+        if event.keyCode == 49 && event.type == .keyUp && canvas.spacePressed {
+            canvas.setSpacePressed(false); return nil
+        }
         let plain = event.modifierFlags.intersection([.command, .control, .option]).isEmpty
         if help.isShown, event.type == .keyDown, plain, [4, 53].contains(event.keyCode) { help.close(); return nil }
         guard isVisible, (event.window === overlay || (event.window == nil && overlay.isKeyWindow)),
               overlay.attachedSheet == nil, NSApp.modalWindow == nil, !(overlay.firstResponder is NSTextView),
               !event.modifierFlags.contains(.control), !event.modifierFlags.contains(.option) else { return event }
-        if event.keyCode == 49 && canvas.isWriting && plain { canvas.setPreview(event.type == .keyDown); return nil }
+        if event.keyCode == 49 && canvas.isWriting && plain { if !event.isARepeat { canvas.setSpacePressed(event.type == .keyDown) }; return nil }
         guard event.type == .keyDown else { return event }
         if event.modifierFlags.contains(.command) {
             switch event.keyCode {
@@ -203,7 +228,7 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
             }
             return nil
         }
-        if event.isARepeat && [36, 76, 3, 53, 8, 4].contains(event.keyCode) { return nil }
+        if event.isARepeat && [36, 76, 3, 53, 8, 4, 14, 40, 46].contains(event.keyCode) { return nil }
         switch event.keyCode {
         case 36, 76: toggleInteraction()
         case 53, 3: finish()
@@ -211,6 +236,9 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
         case 16: redo()
         case 8: clearMarks()
         case 4: showHelp()
+        case 14: toggleEraser()
+        case 40: showPalette()
+        case 46: toggleDrawingMode()
         default: return event
         }
         return nil
@@ -218,8 +246,23 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
 
     @objc func undo() { canvas.engine.undo(); canvas.changed(); scheduleSave() }
     @objc func redo() { canvas.engine.redo(); canvas.changed(); scheduleSave() }
-    @objc private func changeColor(_ sender: NSSegmentedControl) {
-        canvas.engine.finish(); canvas.engine.color = [InkColor.coral, .blue, .green, .graphite][sender.selectedSegment]
+    private func selectColor(_ color: InkColor) { canvas.engine.finish(); canvas.engine.color = color; canvas.changed() }
+    @objc func showPalette() {
+        pause()
+        palette.show(color: canvas.engine.color, preferences: preferences, onSelect: { [weak self] in self?.selectColor($0) }, onDone: { [weak self] in self?.resume() })
+    }
+    @objc func toggleEraser() {
+        canvas.toggleEraser()
+        if !canvas.isWriting { resume() }
+    }
+    @objc private func changeEraserSize(_ sender: NSSlider) { canvas.engine.finish(); canvas.eraserDiameter = sender.doubleValue; canvas.changed() }
+    @objc private func changeDrawingMode(_ sender: NSPopUpButton) {
+        preferences.mode = sender.indexOfSelectedItem == 0 ? .holdToDraw : .touchToDraw
+        canvas.drawingMode = preferences.mode
+    }
+    @objc private func toggleDrawingMode() {
+        preferences.mode = preferences.mode == .holdToDraw ? .touchToDraw : .holdToDraw
+        canvas.drawingMode = preferences.mode
     }
     @objc private func changeBrush(_ sender: NSSegmentedControl) { canvas.engine.finish(); canvas.engine.brush = sender.selectedSegment == 0 ? .pen : .brush }
     @objc private func changeWidth(_ sender: NSSlider) { canvas.engine.finish(); canvas.engine.width = sender.doubleValue / 1000 }
@@ -241,10 +284,13 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
     }
 
     private func refresh() {
+        colors.selected = canvas.engine.color
+        eraserButton.state = canvas.engine.tool == .eraser ? .on : .off
+        drawingModeControl.selectItem(at: canvas.drawingMode == .holdToDraw ? 0 : 1)
         modeButton.title = canvas.isWriting ? "操作桌面 ↩" : "继续标记"
         undoButton.isEnabled = canvas.engine.canUndo; redoButton.isEnabled = canvas.engine.canRedo
         hint.stringValue = saveError ?? (canvas.isWriting
-            ? "● 正在标记 · Enter 操作桌面 · 空格预览 · F / Esc 退出 · \(canvas.engine.document.strokes.count) 笔"
+            ? "\(canvas.inputHint) · Enter 操作桌面 · \(canvas.engine.document.strokes.count) 笔"
             : "○ 操作桌面 · 标记保留可见，点击和滚动穿过标记层 · 点「继续标记」恢复 · 工具条可拖动")
         onChange?()
     }
@@ -333,7 +379,19 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
         // Let the WindowServer apply the mouse-event routing change before querying it.
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         checks["desktopEnterAllowsInteraction"] = !canvas.isWriting && overlay.ignoresMouseEvents && !canvas.cursorDetached && !canvas.cursorHidden
-        checks["desktopPausedInkDoesNotInterceptClicks"] = NSWindow.windowNumber(at: NSPoint(x: overlay.frame.minX + overlay.frame.width * 0.15, y: overlay.frame.minY + overlay.frame.height * 0.52), belowWindowWithWindowNumber: 0) != overlay.windowNumber
+        let hitPoint = NSPoint(x: overlay.frame.minX + overlay.frame.width * 0.15, y: overlay.frame.minY + overlay.frame.height * 0.52)
+        NSApp.updateWindows()
+        let deadline = Date().addingTimeInterval(1)
+        var pausedHit = NSWindow.windowNumber(at: hitPoint, belowWindowWithWindowNumber: 0)
+        var hitNumbers = [pausedHit]
+        while pausedHit == overlay.windowNumber && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05)); NSApp.updateWindows()
+            pausedHit = NSWindow.windowNumber(at: hitPoint, belowWindowWithWindowNumber: 0)
+            hitNumbers.append(pausedHit)
+        }
+        checks["desktopPausedHitWindowNumbers"] = hitNumbers
+        checks["desktopPauseIgnoresMouseEvents"] = overlay.ignoresMouseEvents
+        checks["desktopPausedInkDoesNotInterceptClicks"] = overlay.ignoresMouseEvents && pausedHit != overlay.windowNumber
         checks["desktopInteractionKeepsMarksVisible"] = overlay.isVisible && toolbar.isVisible && canvas.engine.document.strokes.count == count
         resume()
         checks["desktopResumeCapturesAgain"] = canvas.isWriting && !overlay.ignoresMouseEvents

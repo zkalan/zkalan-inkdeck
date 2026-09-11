@@ -6,7 +6,7 @@ mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$project_dir/.
 xcrun swiftc -swift-version 5 -O -target arm64-apple-macosx13.0 \
   -module-cache-path "$project_dir/.build/module-cache" \
   "$project_dir/Sources/InkModel.swift" "$project_dir/Sources/InkRenderer.swift" "$project_dir/Sources/CanvasView.swift" \
-  "$project_dir/Sources/DesktopOverlay.swift" "$project_dir/Sources/App.swift" "$project_dir/Sources/main.swift" \
+  "$project_dir/Sources/ColorControls.swift" "$project_dir/Sources/DesktopOverlay.swift" "$project_dir/Sources/App.swift" "$project_dir/Sources/FeatureChecks.swift" "$project_dir/Sources/main.swift" \
   -framework AppKit -framework CoreGraphics -o "$app_dir/Contents/MacOS/ZkalanInkDeck"
 cat > "$app_dir/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -17,8 +17,8 @@ cat > "$app_dir/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Zkalan InkDeck</string>
 <key>CFBundleDisplayName</key><string>Zkalan InkDeck</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.4.0</string>
-<key>CFBundleVersion</key><string>4</string>
+<key>CFBundleShortVersionString</key><string>0.5.0</string>
+<key>CFBundleVersion</key><string>5</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>

@@ -1,2 +1,2 @@
-3980eb4df4c33691d4f8097a47bb49b2c193a3a88015349eb6c2d3c28ba019e6  ZkalanInkDeck-0.4.0-macOS-arm64.zip
-a745b6a9f3372a74debe7d3420f97e8e00a8f5e6e1a638275606a9f4ce25f8fb  ZkalanInkDeck-0.4.0-validation.zip
+1fa837b65d037427c9c7acef3e80af41c555fa2a0820c027d90b02b8532bda2d  ZkalanInkDeck-0.5.0-macOS-arm64.zip
+e4993dca881d4f62ba990a9a7b2046f93c41fbcf634b8a2b4532ca6d3c75e18d  ZkalanInkDeck-0.5.0-validation.zip

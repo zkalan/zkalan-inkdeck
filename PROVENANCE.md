@@ -1,6 +1,6 @@
 # 代码来源与依赖说明
 
-记录日期：2026-09-10。
+记录日期：2026-09-11。
 
 ## 实现范围
 
@@ -10,9 +10,11 @@
 - 公开 NSTouch / Force Touch 事件适配和画布绘制位于 `Sources/CanvasView.swift`。
 - 逐点宽度路径、曲线插值与缓存位于 `Sources/InkRenderer.swift`。
 - 桌面透明窗口、暂停穿透、工具条和独立保存位于 `Sources/DesktopOverlay.swift`。
+- 原生调色盘、最近颜色和偏好设置位于 `Sources/ColorControls.swift`。
+- 新功能的合成输入和像素验证位于 `Sources/FeatureChecks.swift`。
 - 菜单、单键分发与主画板位于 `Sources/App.swift`。
 
-本轮实现未下载、复制或移植其他手写/标记应用的源代码。当前源码目录没有第三方源码包、Swift Package 依赖或其他依赖管理文件。版本 0.4 的应用改动基于本项目早期原型继续开发，并非从外部仓库 fork。
+本轮实现未下载、复制或移植其他手写/标记应用的源代码。当前源码目录没有第三方源码包、Swift Package 依赖或其他依赖管理文件。版本 0.4 / 0.5 的应用改动基于本项目早期原型继续开发，并非从外部仓库 fork。
 
 使用了常规几何与数值方法，例如坐标变换、双指中心/距离、Catmull–Rom 插值、指数平滑及圆片与四边形组成的笔画轮廓。这里说明的是这些方法在本项目中的实现来源，不主张发明通用算法，也不以代码来源说明代替对所有互联网项目的相似性审查。
 
@@ -32,6 +34,9 @@
 - [Apple：窗口命中查询](https://developer.apple.com/documentation/appkit/nswindow/windownumber(at:belowwindowwithwindownumber:))
 
 这些参考用于理解系统 API 与行为，没有将第三方应用的实现作为本项目的代码模板。
+
+- [Apple：NSColorPanel](https://developer.apple.com/documentation/appkit/nscolorpanel)
+- [Apple：透明图层合成](https://developer.apple.com/library/archive/documentation/GraphicsImaging/Conceptual/drawingwithquartz2d/dq_trans_layers/dq_trans_layers.html)
 
 ## 名称检索
 

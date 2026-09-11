@@ -11,8 +11,51 @@ struct InkPoint: Codable, Equatable {
     var clampedToUnit: InkPoint { InkPoint(min(1, max(0, x)), min(1, max(0, y))) }
 }
 
-enum InkColor: String, Codable, CaseIterable {
-    case graphite, blue, coral, green
+struct InkColor: RawRepresentable, Codable, Equatable, Hashable, CaseIterable {
+    let rawValue: String
+    static let graphite = InkColor(rawValue: "graphite")!
+    static let blue = InkColor(rawValue: "blue")!
+    static let coral = InkColor(rawValue: "coral")!
+    static let green = InkColor(rawValue: "green")!
+    static let allCases: [InkColor] = [.graphite, .blue, .coral, .green]
+    init?(rawValue: String) {
+        let named = ["graphite", "blue", "coral", "green"]
+        if named.contains(rawValue) { self.rawValue = rawValue; return }
+        let hex = rawValue.uppercased()
+        guard hex.count == 7, hex.first == "#", UInt32(hex.dropFirst(), radix: 16) != nil else { return nil }
+        self.rawValue = hex
+    }
+    var rgb: UInt32 {
+        switch rawValue {
+        case "graphite": return 0x24333D
+        case "blue": return 0x3363D9
+        case "coral": return 0xD65240
+        case "green": return 0x217A61
+        default: return UInt32(rawValue.dropFirst(), radix: 16)!
+        }
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        guard let value = InkColor(rawValue: try c.decode(String.self)) else {
+            throw DecodingError.dataCorruptedError(in: c, debugDescription: "Invalid ink color")
+        }
+        self = value
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer(); try c.encode(rawValue)
+    }
+}
+
+enum DrawingMode: String, Codable { case holdToDraw, touchToDraw }
+enum InkTool { case pen, eraser }
+
+struct RecentInkColors: Codable {
+    private(set) var colors: [InkColor] = []
+    mutating func use(_ color: InkColor) {
+        colors.removeAll { $0.rgb == color.rgb }
+        colors.insert(color, at: 0)
+        colors = Array(colors.prefix(6))
+    }
 }
 
 enum InkBrush: String, Codable { case pen, brush }
@@ -80,6 +123,8 @@ struct InkStroke: Codable {
     var brush: InkBrush? = nil
     var widthFactors: [Double]? = nil
     var id: UUID? = UUID()
+    // Eraser strokes remove only earlier ink; nil keeps legacy documents compatible.
+    var eraser: Bool? = nil
 
     func factor(at index: Int) -> Double {
         guard let widthFactors, widthFactors.indices.contains(index) else { return 1 }
@@ -91,7 +136,7 @@ struct InkDocument: Codable {
     var strokes: [InkStroke] = []
     var aspect: Double = 1.6
     var viewport: InkViewport? = nil
-    var formatVersion: Int? = 2
+    var formatVersion: Int? = 3
 
     var isValid: Bool {
         guard aspect.isFinite, (0.5...3).contains(aspect) else { return false }
@@ -99,7 +144,7 @@ struct InkDocument: Codable {
             guard v.zoom.isFinite, InkViewport.zoomRange.contains(v.zoom), Self.valid(v.center) else { return false }
         }
         return strokes.allSatisfy { stroke in
-            stroke.width.isFinite && (0.00001...0.1).contains(stroke.width) && stroke.points.allSatisfy(Self.valid)
+            stroke.width.isFinite && (0.00001...(stroke.eraser == true ? 10.0 : 0.1)).contains(stroke.width) && stroke.points.allSatisfy(Self.valid)
             && (stroke.widthFactors == nil || (stroke.widthFactors!.count == stroke.points.count
                 && stroke.widthFactors!.allSatisfy { $0.isFinite && (0.02...10).contains($0) }))
         }
@@ -109,7 +154,7 @@ struct InkDocument: Codable {
     }
     var contentBounds: CGRect {
         var bounds: CGRect?
-        for stroke in strokes {
+        for stroke in strokes where stroke.eraser != true {
             let radius = stroke.width * (stroke.widthFactors?.max() ?? 1) / 2
             for point in stroke.points {
                 let rect = CGRect(x: point.x - radius, y: point.y - radius * aspect, width: radius * 2, height: radius * 2 * aspect)
@@ -150,6 +195,9 @@ final class InkEngine {
     var pressureEnabled = true
     var pressureSensitivity: Double = 2
     var lightTouchAssistance = true
+    var tool: InkTool = .pen
+    var eraserWidth: Double = 0.025
+    var onColorUsed: ((InkColor) -> Void)?
     private(set) var pointer: InkPoint?
     private(set) var preview = false
     private(set) var blockedUntilLift = false
@@ -191,7 +239,10 @@ final class InkEngine {
             redoStack.removeAll()
             smoothedFactor = widthFactor(for: finger)
             document.strokes.append(InkStroke(points: [finger.point], color: color,
-                width: width * (brush == .brush ? 1.8 : 1), brush: brush, widthFactors: [smoothedFactor]))
+                width: tool == .eraser ? eraserWidth : width * (brush == .brush ? 1.8 : 1),
+                brush: tool == .eraser ? nil : brush, widthFactors: [smoothedFactor], eraser: tool == .eraser ? true : nil))
+            document.formatVersion = 3
+            if tool == .pen { onColorUsed?(color) }
             activeStroke = document.strokes.count - 1
             activeID = finger.id
             lastSample = finger
@@ -204,6 +255,7 @@ final class InkEngine {
     }
 
     private func widthFactor(for sample: FingerSample) -> Double {
+        if tool == .eraser { return 1 }
         let response = PressureResponse.normalized(sample.pressure, sensitivity: pressureSensitivity)
         if pressureEnabled && lightTouchAssistance {
             let base = brush == .brush ? 0.65 + 1.2 / (1 + filteredSpeed / 0.65) : 0.70 + 0.9 / (1 + filteredSpeed / 0.65)
@@ -242,7 +294,7 @@ final class InkEngine {
     }
 
     func updatePressure(_ pressure: Double, timestamp: Double) {
-        guard var sample = lastSample, activeID != nil, !preview else { return }
+        guard tool == .pen, var sample = lastSample, activeID != nil, !preview else { return }
         sample.pressure = pressure; sample.timestamp = timestamp
         append(sample, pressureOnly: true)
     }

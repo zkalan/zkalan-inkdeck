@@ -174,6 +174,37 @@ import CoreGraphics
         let fastFactor = velocity.document.strokes[0].widthFactors!.last!
         velocity.updatePressure(0, timestamp: 1.03)
         check(velocity.document.strokes[0].widthFactors!.last! <= fastFactor, "独立压力事件不会把移动速度错误重置为零")
+        let purple = InkColor(rawValue: "#a034df")!
+        check(purple.rawValue == "#A034DF", "自定义颜色规范化为六位十六进制")
+        check(InkColor(rawValue: "#GG0000") == nil && InkColor(rawValue: "red") == nil, "无效颜色不会进入草稿")
+        var recent = RecentInkColors()
+        for i in 0..<9 { recent.use(InkColor(rawValue: String(format: "#%06X", i))!) }
+        check(recent.colors.count == 6 && recent.colors.first?.rgb == 8, "最近颜色最多六个，新用的颜色排最前")
+        recent.use(InkColor(rawValue: "#000005")!)
+        check(recent.colors.first?.rgb == 5 && recent.colors.count == 6, "重复使用颜色只提前排序，不重复占位")
+        recent.use(.blue); recent.use(InkColor(rawValue: "#3363D9")!)
+        check(recent.colors.filter { $0.rgb == InkColor.blue.rgb }.count == 1, "预设色与相同自定义色合并记录")
+        let erase = InkEngine(); var used: [InkColor] = []
+        erase.onColorUsed = { used.append($0) }; erase.color = purple
+        erase.setPreview(true); erase.frame([finger(1, 0.2, 0.5)])
+        check(used.isEmpty, "预览和选色不记入最近使用")
+        erase.setPreview(false); erase.frame([finger(1, 0.2, 0.5)]); erase.frame([finger(1, 0.8, 0.5)]); erase.frame([])
+        check(used == [purple], "一笔只记录一次实际用色")
+        erase.tool = .eraser; erase.eraserWidth = 0.05
+        erase.frame([finger(2, 0.5, 0.3)]); erase.frame([finger(2, 0.5, 0.7)]); erase.frame([])
+        check(erase.document.strokes.last?.eraser == true && erase.document.strokes.last?.width == 0.05 && used.count == 1, "擦除单独记录且不污染最近颜色")
+        check(erase.document.strokes.last?.widthFactors == [1, 1], "橡皮擦大小不受压感或速度影响")
+        erase.undo()
+        check(erase.document.strokes.count == 1 && erase.canRedo, "撤销擦除保留原笔画")
+        erase.redo()
+        check(erase.document.strokes.last?.eraser == true, "重做恢复擦除动作")
+        let eraseDoc = try! JSONDecoder().decode(InkDocument.self, from: JSONEncoder().encode(erase.document))
+        check(eraseDoc.isValid && eraseDoc.strokes[0].color == purple && eraseDoc.strokes[1].eraser == true, "草稿保留自定义颜色与擦除顺序")
+        let originalBounds = eraseDoc.contentBounds
+        var farErase = eraseDoc
+        farErase.strokes.append(InkStroke(points: [InkPoint(100, 100)], color: .blue, width: 0.1, eraser: true))
+        check(farErase.contentBounds == originalBounds, "空白区域的擦除不扩大作品边界")
+        check(legacyDoc.strokes[0].eraser == nil && legacyDoc.strokes[0].color == .graphite, "旧草稿缺少擦除字段仍正常读取")
         print("\(passed) checks passed.")
     }
 }

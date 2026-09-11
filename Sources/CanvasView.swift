@@ -3,15 +3,16 @@ import CoreGraphics
 
 extension InkColor {
     var nsColor: NSColor {
-        switch self {
-        case .graphite: return NSColor(srgbRed: 0.14, green: 0.20, blue: 0.24, alpha: 1)
-        case .blue: return NSColor(srgbRed: 0.20, green: 0.39, blue: 0.85, alpha: 1)
-        case .coral: return NSColor(srgbRed: 0.84, green: 0.32, blue: 0.25, alpha: 1)
-        case .green: return NSColor(srgbRed: 0.13, green: 0.48, blue: 0.38, alpha: 1)
-        }
+        NSColor(srgbRed: Double((rgb >> 16) & 255) / 255, green: Double((rgb >> 8) & 255) / 255,
+                blue: Double(rgb & 255) / 255, alpha: 1)
+    }
+    init(_ color: NSColor) {
+        let c = color.usingColorSpace(.sRGB) ?? .black
+        func byte(_ value: CGFloat) -> Int { Int((min(1, max(0, value)) * 255).rounded()) }
+        self = InkColor(rawValue: String(format: "#%02X%02X%02X", byte(c.redComponent), byte(c.greenComponent), byte(c.blueComponent)))!
     }
     var title: String {
-        switch self { case .graphite: return "墨黑"; case .blue: return "靛蓝"; case .coral: return "朱红"; case .green: return "松绿" }
+        switch rawValue { case "graphite": return "墨黑"; case "blue": return "靛蓝"; case "coral": return "朱红"; case "green": return "松绿"; default: return rawValue }
     }
 }
 
@@ -19,6 +20,37 @@ final class CanvasView: NSView {
     let engine = InkEngine()
     var onChange: (() -> Void)?
     var onDocumentChange: (() -> Void)?
+    var drawingMode: DrawingMode = .holdToDraw { didSet { spacePressed = false; updateInputGate(); changed() } }
+    private(set) var spacePressed = false
+    var eraserDiameter: Double = 26
+    private var latestFingers: [FingerSample] = []
+    var inputHint: String {
+        if engine.tool == .eraser { return "橡皮擦 · 移动手指擦除 · E 返回画笔 · Z 撤销" }
+        return drawingMode == .holdToDraw
+            ? (spacePressed ? "正在画图 · 松开空格停笔 · 抬手断笔" : "预览落点 · 按住空格画图 · E 橡皮擦")
+            : (spacePressed ? "预览落点 · 松开空格画图" : "轻触落笔 · 按住空格预览 · E 橡皮擦")
+    }
+    private func updateInputGate() {
+        engine.setPreview(engine.tool == .pen && (drawingMode == .holdToDraw ? !spacePressed : spacePressed))
+        sessionMessage = inputHint
+    }
+    func setSpacePressed(_ pressed: Bool) {
+        guard isWriting, spacePressed != pressed else { return }
+        spacePressed = pressed; updateInputGate()
+        // Start exactly at the previewed point even if the finger stays still.
+        if !engine.preview, latestFingers.count == 1, !navigationUntilLift {
+            let before = engine.revision
+            engine.frame(latestFingers.map { sample in
+                var s = sample; if !desktopSurface { s.point = viewport.worldPoint(at: s.point) }; return s
+            })
+            if before != engine.revision { onDocumentChange?() }
+        } else { onDocumentChange?() }
+        changed()
+    }
+    func toggleEraser() {
+        engine.finish(); engine.tool = engine.tool == .pen ? .eraser : .pen
+        spacePressed = false; updateInputGate(); changed(); onDocumentChange?()
+    }
     private(set) var isWriting = false
     private(set) var receivedFrames = 0
     private(set) var contactCount = 0
@@ -95,7 +127,7 @@ final class CanvasView: NSView {
         cursorDetached = true
         cursorHidden = CGDisplayHideCursor(CGMainDisplayID()) == .success
         isWriting = true
-        sessionMessage = "先抬起手指，再轻触书写 · 按 Esc 退出"
+        spacePressed = false; updateInputGate()
         changed()
         return true
     }
@@ -103,7 +135,9 @@ final class CanvasView: NSView {
     func stopWriting(message: String = "已退出书写，可以正常使用光标") {
         let wasWriting = isWriting
         isWriting = false
+        spacePressed = false; latestFingers = []
         engine.cancelContacts()
+        updateInputGate()
         resetNavigation()
         contactCount = 0
         if cursorDetached {
@@ -178,6 +212,9 @@ final class CanvasView: NSView {
     // The real NSTouch adapter and the integration checks share this routing path.
     // Synthetic samples deliberately do not increment the hardware-input counter.
     func processTouchFrame(_ fingers: [FingerSample], ended: [FingerSample] = [], timestamp: Double) {
+        latestFingers = fingers
+        engine.eraserWidth = min(10, eraserDiameter / max(1, paperRect.width) / (desktopSurface ? 1 : viewport.zoom))
+        updateInputGate()
         if desktopSurface {
             contactCount = fingers.count
             let oldRevision = engine.revision
@@ -211,7 +248,7 @@ final class CanvasView: NSView {
             } else { sessionMessage = "接触点过多，请全部抬手后重试" }
         } else if navigationUntilLift {
             if fingers.isEmpty { resetNavigation(); engine.frame([]) }
-            sessionMessage = fingers.isEmpty ? "轻触书写 · 双指移动和缩放" : "请先全部抬手，再用单指继续写"
+            sessionMessage = fingers.isEmpty ? inputHint : "请先全部抬手，再用单指继续写"
         } else {
             rawPointer = fingers.first?.point
             func world(_ sample: FingerSample) -> FingerSample {
@@ -219,7 +256,7 @@ final class CanvasView: NSView {
             }
             engine.frame(fingers.map(world), ended: ended.map(world))
             if fingers.isEmpty { currentPressure = 0 }
-            sessionMessage = engine.preview ? "正在预览落点 · 松开空格后书写" : "轻触书写 · 加力增粗 · 双指移动和缩放"
+            sessionMessage = inputHint
         }
         changed()
         if engine.revision != oldRevision { onDocumentChange?() }
@@ -228,7 +265,7 @@ final class CanvasView: NSView {
     override func touchesMoved(with event: NSEvent) { receive(event) }
     override func touchesEnded(with event: NSEvent) { receive(event) }
     override func touchesCancelled(with event: NSEvent) {
-        engine.cancelContacts(); contactCount = 0; resetNavigation(); changed(); onDocumentChange?()
+        engine.cancelContacts(); spacePressed = false; latestFingers = []; updateInputGate(); contactCount = 0; resetNavigation(); changed(); onDocumentChange?()
     }
     override func pressureChange(with event: NSEvent) {
         guard isWriting else { return }
@@ -260,12 +297,6 @@ final class CanvasView: NSView {
         let zoom = min(16, max(0.1, 0.90 / max(rect.width, rect.height)))
         viewport = InkViewport(zoom: zoom, center: InkPoint(rect.midX, rect.midY))
         navigation = nil; changed(); onDocumentChange?()
-    }
-    func setPreview(_ enabled: Bool) {
-        guard isWriting else { return }
-        engine.setPreview(enabled)
-        sessionMessage = enabled ? "正在预览落点 · 松开空格后书写" : "轻触落笔，抬手断笔 · 按 Esc 退出"
-        changed()
     }
     func changed() { needsDisplay = true; onChange?() }
 
@@ -338,9 +369,9 @@ final class CanvasView: NSView {
     private func drawPointer(in paper: NSRect) {
         if let point = rawPointer, isWriting {
             let p = NSPoint(x: paper.minX + point.x * paper.width, y: paper.minY + point.y * paper.height)
-            let radius: CGFloat = engine.preview ? 11 : 6
+            let radius: CGFloat = engine.tool == .eraser ? engine.eraserWidth * paper.width * (desktopSurface ? 1 : viewport.zoom) / 2 : engine.preview ? 11 : 6
             let ring = NSBezierPath(ovalIn: NSRect(x: p.x - radius, y: p.y - radius, width: 2 * radius, height: 2 * radius))
-            InkColor.green.nsColor.setStroke(); ring.lineWidth = 1.5; ring.stroke()
+            (engine.tool == .eraser ? NSColor.systemRed : engine.color.nsColor).setStroke(); ring.lineWidth = 1.5; ring.stroke()
             if engine.preview {
                 let cross = NSBezierPath()
                 cross.move(to: NSPoint(x: p.x - 17, y: p.y)); cross.line(to: NSPoint(x: p.x + 17, y: p.y))
@@ -360,7 +391,7 @@ final class CanvasView: NSView {
     func pngData() -> Data? {
         // Export every stroke, including content outside the current viewport.
         var content: CGRect?
-        for stroke in engine.document.strokes {
+        for stroke in engine.document.strokes where stroke.eraser != true {
             let path = InkRenderer.path(for: stroke, aspect: engine.document.aspect, active: false)
             if !path.isEmpty { content = content.map { $0.union(path.boundingBoxOfPath) } ?? path.boundingBoxOfPath }
         }
