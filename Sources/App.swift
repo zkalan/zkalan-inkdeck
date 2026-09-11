@@ -103,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         buildMenu()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 830), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Zkalan InkDeck"
-        window.subtitle = "0.5.1 · 按住 E 临时擦除"
+        window.subtitle = "0.5.2 · 抬手保留指针"
         window.minSize = NSSize(width: 1000, height: 640)
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -377,7 +377,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         redoButton.isEnabled = canvas.engine.canRedo
         clearButton.isEnabled = canvas.engine.canUndo
         exportButton.isEnabled = canvas.engine.canUndo
-        padMap.pointer = canvas.rawPointer
+        padMap.pointer = canvas.visiblePointer
         if let point = canvas.rawPointer { coordinateLabel.stringValue = String(format: "X %5.1f%%    Y %5.1f%%", point.x * 100, point.y * 100) }
         else { coordinateLabel.stringValue = "X —    Y —" }
         countLabel.stringValue = "\(canvas.engine.document.strokes.count) 笔画 · \(canvas.receivedFrames) 次输入"
@@ -486,7 +486,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     @objc func showAbout() {
         canvas.stopWriting()
-        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Zkalan InkDeck", .applicationVersion: "0.5.1 · 按住 E 临时擦除", .credits: NSAttributedString(string: "桌面标记 · 轻触增强 · 单键操作\n画板与桌面笔迹分别保存在本机。")])
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Zkalan InkDeck", .applicationVersion: "0.5.2 · 抬手保留指针", .credits: NSAttributedString(string: "桌面标记 · 轻触增强 · 单键操作\n画板与桌面笔迹分别保存在本机。")])
     }
     func scheduleSave() {
         guard !smokeMode else { return }

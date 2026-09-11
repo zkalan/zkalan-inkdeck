@@ -33,8 +33,15 @@ extension AppDelegate {
                 surface.processTouchFrame(id.map { [FingerSample(id: $0, point: InkPoint(x, y), timestamp: time)] } ?? [], timestamp: time)
             }
             checks[prefix + "DefaultHoldMode"] = surface.isWriting && surface.engine.preview && !surface.spacePressed
+            checks[prefix + "PointerVisibleBeforeContact"] = surface.visiblePointer != nil && !surface.pointerIsLive
+            touch(500, 0.25, 0.45); touch(nil)
+            checks[prefix + "LiftKeepsReferenceWithoutLiveContact"] = surface.visiblePointer == InkPoint(0.25, 0.45) && surface.rawPointer == nil && !surface.pointerIsLive
+            _ = route(key(49))
+            checks[prefix + "SpaceInAirCannotDrawAtReference"] = surface.engine.document.strokes.isEmpty && surface.visiblePointer == InkPoint(0.25, 0.45)
+            _ = route(key(49, .keyUp))
             touch(501, 0.2, 0.5); touch(501, 0.3, 0.5)
             checks[prefix + "HoverPreviewNoInk"] = surface.engine.document.strokes.isEmpty && surface.rawPointer == InkPoint(0.3, 0.5)
+            checks[prefix + "NewContactUpdatesVisiblePointer"] = surface.visiblePointer == InkPoint(0.3, 0.5) && surface.pointerIsLive
             _ = route(key(49))
             checks[prefix + "SpaceStartsAtStationaryPreview"] = surface.engine.document.strokes.first?.points.first == InkPoint(0.3, 0.5)
             touch(501, 0.7, 0.5)
@@ -176,7 +183,32 @@ extension AppDelegate {
             surface.engine.document.strokes = []
             checks[prefix + "CursorVisibleOverLightOrTransparentBackground"] = cursorColors().dark > 20
             touch(nil)
+            checks[prefix + "IdlePointerVisibleOverLightOrTransparentBackground"] = cursorColors().dark > 20 && !surface.pointerIsLive
+            snapshot(surface, prefix + "-cursor-lifted.png")
+            surface.engine.document.strokes = [black]
+            checks[prefix + "IdlePointerVisibleOverSolidBlackInk"] = cursorColors().light > 20
+            snapshot(surface, prefix + "-cursor-lifted-dark.png")
+            surface.engine.document.strokes = []
+            touch(607, 0.48, 0.5)
+            surface.processTouchFrame([], ended: [FingerSample(id: 607, point: InkPoint(0.5, 0.5), timestamp: time + 0.01)], timestamp: time + 0.01)
+            checks[prefix + "LiftUsesFinalPreviewEndpointWithoutInk"] = surface.visiblePointer == InkPoint(0.5, 0.5) && !surface.pointerIsLive && surface.engine.document.strokes.isEmpty
+            let reference = surface.visiblePointer
+            let pair = [FingerSample(id: 608, point: InkPoint(0.2, 0.3)), FingerSample(id: 609, point: InkPoint(0.7, 0.6))]
+            surface.processTouchFrame(pair, timestamp: time + 0.02)
+            surface.processTouchFrame([pair[0]], timestamp: time + 0.03)
+            checks[prefix + "NavigationKeepsReferenceWithoutLivePen"] = surface.visiblePointer == reference && !surface.pointerIsLive && surface.engine.document.strokes.isEmpty
+            touch(nil)
+            surface.zoom(by: 2)
+            checks[prefix + "ZoomKeepsPointerAtSameScreenPosition"] = surface.visiblePointer == reference
+            surface.resetViewport()
+            _ = route(key(14))
+            checks[prefix + "EraserInAirKeepsReferenceWithoutErasing"] = surface.visiblePointer == reference && surface.engine.document.strokes.isEmpty
+            _ = route(key(14, .keyUp))
             surface.engine.clear(); surface.engine.document = displayDocument; surface.engine.color = displayColor
+            surface.stopWriting()
+            checks[prefix + "PauseHidesReferenceAndRestoresSystemCursor"] = surface.visiblePointer == nil && !surface.cursorHidden && !surface.cursorDetached
+            surface.startWriting()
+            checks[prefix + "ResumeKeepsReferenceBeforeContact"] = surface.visiblePointer == reference && !surface.pointerIsLive
             surface.stopWriting()
         }
 

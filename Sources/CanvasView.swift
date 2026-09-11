@@ -73,6 +73,11 @@ final class CanvasView: NSView {
     var desktopSurface = false { didSet { needsDisplay = true } }
     var handTool = false { didSet { changed() } }
     private(set) var rawPointer: InkPoint?
+    // A display reference outlives the contact; it never feeds ink or pressure input.
+    private var pointerReference = InkPoint(0.5, 0.5)
+    private var hasPointerReference = false
+    var visiblePointer: InkPoint? { isWriting ? pointerReference : nil }
+    var pointerIsLive: Bool { isWriting && rawPointer != nil && contactCount == 1 }
     private(set) var currentPressure: Double = 0
     private(set) var pressureEventCount = 0
     private(set) var isNavigating = false
@@ -125,6 +130,14 @@ final class CanvasView: NSView {
         handTool = false
         let appPoint = window.convertPoint(toScreen: convert(NSPoint(x: bounds.midX, y: bounds.midY), to: nil))
         savedCursor = CGEvent(source: nil)?.location
+        if !hasPointerReference {
+            let local = convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+            if paperRect.contains(local) {
+                pointerReference = InkPoint((local.x - paperRect.minX) / paperRect.width,
+                                            (local.y - paperRect.minY) / paperRect.height).clampedToUnit
+            }
+            hasPointerReference = true
+        }
         // Keep the OS cursor over this NSView so each new touch sequence reaches it.
         let warp = CGWarpMouseCursorPosition(CGPoint(x: appPoint.x, y: screenTop - appPoint.y))
         guard warp == .success else {
@@ -224,6 +237,11 @@ final class CanvasView: NSView {
     // The real NSTouch adapter and the integration checks share this routing path.
     // Synthetic samples deliberately do not increment the hardware-input counter.
     func processTouchFrame(_ fingers: [FingerSample], ended: [FingerSample] = [], timestamp: Double) {
+        // Keep the final reported endpoint, including a lift after previewing without ink.
+        if fingers.isEmpty, rawPointer != nil, latestFingers.count == 1,
+           let last = ended.first(where: { $0.id == latestFingers[0].id }) {
+            pointerReference = last.point.clampedToUnit; hasPointerReference = true
+        }
         latestFingers = fingers
         if fingers.isEmpty { toolReleaseUntilLift = false }
         engine.eraserWidth = min(10, eraserDiameter / max(1, paperRect.width) / (desktopSurface ? 1 : viewport.zoom))
@@ -234,6 +252,7 @@ final class CanvasView: NSView {
             if fingers.count >= 2 { engine.discardGesturePrelude(maxLength: 0.012); currentPressure = 0 }
             engine.frame(fingers, ended: ended)
             rawPointer = fingers.count == 1 && !engine.blockedUntilLift ? fingers.first?.point : nil
+            rememberPointer()
             if fingers.isEmpty { currentPressure = 0; updateInputGate() }
             changed()
             if engine.revision != oldRevision { onDocumentChange?() }
@@ -264,6 +283,7 @@ final class CanvasView: NSView {
             sessionMessage = fingers.isEmpty ? inputHint : "请先全部抬手，再用单指继续写"
         } else {
             rawPointer = fingers.first?.point
+            rememberPointer()
             func world(_ sample: FingerSample) -> FingerSample {
                 var result = sample; result.point = viewport.worldPoint(at: sample.point); return result
             }
@@ -273,6 +293,9 @@ final class CanvasView: NSView {
         }
         changed()
         if engine.revision != oldRevision { onDocumentChange?() }
+    }
+    private func rememberPointer() {
+        if let rawPointer { pointerReference = rawPointer.clampedToUnit; hasPointerReference = true }
     }
     override func touchesBegan(with event: NSEvent) { receive(event) }
     override func touchesMoved(with event: NSEvent) { receive(event) }
@@ -391,17 +414,18 @@ final class CanvasView: NSView {
     }
 
     private func drawPointer(in paper: NSRect) {
-        if let point = rawPointer, isWriting {
+        if let point = visiblePointer {
             let p = NSPoint(x: paper.minX + point.x * paper.width, y: paper.minY + point.y * paper.height)
-            let radius: CGFloat = engine.tool == .eraser ? engine.eraserWidth * paper.width * (desktopSurface ? 1 : viewport.zoom) / 2 : engine.preview ? 11 : 6
+            let radius: CGFloat = engine.tool == .eraser ? eraserDiameter / 2 : engine.preview ? 11 : 6
             let ring = NSBezierPath(ovalIn: NSRect(x: p.x - radius, y: p.y - radius, width: 2 * radius, height: 2 * radius))
+            if !pointerIsLive { ring.setLineDash([3, 3], count: 2, phase: 0) }
             func contrastingStroke(_ path: NSBezierPath, outer: CGFloat, inner: CGFloat) {
                 path.lineCapStyle = .round
                 NSColor.black.setStroke(); path.lineWidth = outer; path.stroke()
                 NSColor.white.setStroke(); path.lineWidth = inner; path.stroke()
             }
             contrastingStroke(ring, outer: 3.5, inner: 1.5)
-            if engine.preview {
+            if engine.preview && pointerIsLive {
                 let cross = NSBezierPath()
                 cross.move(to: NSPoint(x: p.x - 17, y: p.y)); cross.line(to: NSPoint(x: p.x + 17, y: p.y))
                 cross.move(to: NSPoint(x: p.x, y: p.y - 17)); cross.line(to: NSPoint(x: p.x, y: p.y + 17))

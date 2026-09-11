@@ -1,14 +1,14 @@
-# 下载 · 0.5.1
+# 下载 · 0.5.2
 
-- [Apple Silicon 应用与说明文档](ZkalanInkDeck-0.5.1-macOS-arm64.zip)
-- [验证图像与结果包](ZkalanInkDeck-0.5.1-validation.zip)
+- [Apple Silicon 应用与说明文档](ZkalanInkDeck-0.5.2-macOS-arm64.zip)
+- [验证图像与结果包](ZkalanInkDeck-0.5.2-validation.zip)
 - [SHA-256 校验文件](SHA256SUMS.txt)
-- [GitHub Release](https://github.com/zkalan/zkalan-inkdeck/releases/tag/v0.5.1)
+- [GitHub Release](https://github.com/zkalan/zkalan-inkdeck/releases/tag/v0.5.2)
 
 要求：macOS 13+，Apple Silicon。应用采用临时签名，尚无 Apple 公证；安装说明见根目录 README。
 
-0.5.1 默认按住空格画图、松开预览；按住 E 临时擦除、松开结束，黑白双层指针，桌面暂停后可单击菜单栏画笔恢复。保留调色盘与最近六色，连续书写与按压落笔可选，主画板和桌面均可用。已由用户实机试用并确认可用；模型检查 63 项通过，完整桌面自动回归的未完成部分如实保留，详见 [验证记录](../artifacts/v0.5.1/VALIDATION.md)。
+0.5.2 修复抬手后指针消失：进入书写即显示参考位置，接触时实线、抬手后虚线保留最后位置，暂停恢复普通鼠标。保留空格画图、按住 E 擦除、调色盘及三种输入方式。
 
-应用包包含说明文档，验证包包含合成输入图像和结果。个人草稿、备份及凭据不包含在发布内容中。
+新增 24 项指针检查全部通过，完整应用检查 193/194 项通过，63 项模型检查全部通过。剩余一项为既有的桌面中央窗口命中检查，详细结果见 [验证记录](../artifacts/v0.5.2/VALIDATION.md)，不将合成输入检查等同于实物验证。
 
-旧版 0.4 的下载和对应校验文件保留在 [0.4.0 Release](https://github.com/zkalan/zkalan-inkdeck/releases/tag/v0.4.0)。新版草稿增加了自定义颜色和擦除信息；升级前可用 `zsh scripts/install.sh` 自动备份，不应用旧版本覆盖新版草稿。
+应用包包含说明文档，验证包包含合成图像和实际结果。个人草稿、备份及凭据不包含在发布内容中。旧版下载与对应校验值见各版本的 [GitHub Releases](https://github.com/zkalan/zkalan-inkdeck/releases)。
