@@ -48,13 +48,13 @@ extension AppDelegate {
             _ = route(key(49, repeatKey: true))
             checks[prefix + "RepeatDoesNotRearmClutch"] = surface.engine.preview
             _ = route(key(14))
-            checks[prefix + "EEntersEraser"] = surface.engine.tool == .eraser && !surface.engine.preview
+            checks[prefix + "EHoldEntersEraser"] = surface.engine.tool == .eraser && !surface.engine.preview
             touch(503, 0.5, 0.35); touch(503, 0.5, 0.65); touch(nil)
             checks[prefix + "EraserMovesWithoutSpace"] = surface.engine.document.strokes.last?.eraser == true
             _ = route(key(6)); checks[prefix + "UndoEraser"] = surface.engine.document.strokes.count == 3
             _ = route(key(16)); checks[prefix + "RedoEraser"] = surface.engine.document.strokes.last?.eraser == true
-            _ = route(key(14)); touch(504, 0.1, 0.1); touch(nil)
-            checks[prefix + "EBackToPreviewNoInk"] = surface.engine.preview && surface.engine.tool == .pen && surface.engine.document.strokes.count == 4
+            _ = route(key(14, .keyUp)); touch(504, 0.1, 0.1); touch(nil)
+            checks[prefix + "EReleaseReturnsToPreview"] = surface.engine.preview && surface.engine.tool == .pen && surface.engine.document.strokes.count == 4
             _ = route(key(46)); touch(505, 0.15, 0.8); touch(nil)
             checks[prefix + "OptionalTouchModeDraws"] = surface.drawingMode == .touchToDraw && surface.engine.document.strokes.count == 5
             _ = route(key(49)); touch(506, 0.2, 0.8); touch(nil)
@@ -96,8 +96,87 @@ extension AppDelegate {
                 _ = route(key(14)); touch(508, 0.5, 0.5)
                 let visibleWidth = surface.engine.eraserWidth * surface.paperRect.width * surface.viewport.zoom
                 checks[prefix + "EraserKeepsScreenSizeWhenZoomed"] = abs(visibleWidth - surface.eraserDiameter) < 0.01
-                touch(nil); _ = route(key(14)); surface.resetViewport()
+                touch(nil); _ = route(key(14, .keyUp)); surface.resetViewport()
             }
+            let displayDocument = surface.engine.document
+            let displayColor = surface.engine.color
+            for mode in DrawingMode.allCases {
+                surface.drawingMode = mode
+                let before = surface.engine.document.strokes.count
+                _ = route(key(14)); touch(601, 0.4, 0.6); touch(601, 0.45, 0.6)
+                _ = route(key(14, repeatKey: true))
+                checks[prefix + mode.rawValue + "ERepeatStaysMomentary"] = surface.eraserHeld && surface.engine.tool == .eraser && surface.engine.document.strokes.count == before + 1
+                _ = route(key(14, .keyUp, flags: .control))
+                let eraserPoints = surface.engine.document.strokes.last?.points
+                touch(601, 0.55, 0.6)
+                checks[prefix + mode.rawValue + "EReleaseStopsWithoutExtraInk"] = !surface.eraserHeld && surface.engine.tool == .pen && surface.engine.preview && surface.engine.document.strokes.count == before + 1 && surface.engine.document.strokes.last?.points == eraserPoints
+                touch(nil)
+                checks[prefix + mode.rawValue + "EReleasePreservesInputMode"] = surface.drawingMode == mode && surface.engine.preview == (mode != .touchToDraw)
+            }
+            surface.drawingMode = .holdToDraw
+            let countBeforeTap = surface.engine.document.strokes.count
+            _ = route(key(14)); _ = route(key(14, .keyUp)); touch(602, 0.7, 0.6); touch(nil)
+            checks[prefix + "ETapDoesNotLatchOrErase"] = !surface.eraserHeld && surface.engine.preview && surface.engine.document.strokes.count == countBeforeTap
+            _ = route(key(49)); _ = route(key(14)); touch(603, 0.6, 0.6)
+            _ = route(key(14, .keyUp)); touch(603, 0.62, 0.6)
+            checks[prefix + "EReleaseKeepsSpaceStateButWaitsForLift"] = surface.spacePressed && surface.engine.preview && !surface.eraserHeld
+            touch(nil); touch(604, 0.64, 0.6)
+            checks[prefix + "PenResumesAfterLiftWithSpaceHeld"] = !surface.engine.preview && surface.engine.document.strokes.last?.eraser != true
+            touch(nil); _ = route(key(49, .keyUp))
+            _ = route(key(14)); touch(605, 0.4, 0.4); _ = route(key(49)); _ = route(key(49, .keyUp))
+            checks[prefix + "SpaceReleaseDoesNotCancelHeldE"] = surface.eraserHeld && surface.engine.tool == .eraser
+            _ = route(key(14, .keyUp)); touch(nil)
+            _ = route(key(14)); _ = route(key(40))
+            checks[prefix + "FocusLossCancelsHeldE"] = !surface.isWriting && !surface.eraserHeld && surface.engine.tool == .pen
+            palettePanel.finishPicking()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+            _ = route(key(14, repeatKey: true))
+            checks[prefix + "ERepeatAfterFocusLossCannotRearm"] = surface.isWriting && !surface.eraserHeld && surface.engine.preview
+            _ = route(key(14, .keyUp))
+            func holdButton(in view: NSView) -> HoldEraserButton? {
+                if let button = view as? HoldEraserButton { return button }
+                return view.subviews.compactMap { holdButton(in: $0) }.first
+            }
+            let controlsRoot = surface.desktopSurface ? desktop.toolbar.contentView! : window.contentView!
+            if let button = holdButton(in: controlsRoot), let buttonWindow = button.window {
+                let original = button.onHold
+                var transitions: [Bool] = []
+                button.onHold = { held in transitions.append(held); original?(held) }
+                let location = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+                let down = NSEvent.mouseEvent(with: .leftMouseDown, location: location, modifierFlags: [], timestamp: time, windowNumber: buttonWindow.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+                // App-local event queue only: release outside the button's bounds.
+                let up = NSEvent.mouseEvent(with: .leftMouseUp, location: .zero, modifierFlags: [], timestamp: time + 0.01, windowNumber: buttonWindow.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0)!
+                NSApp.postEvent(up, atStart: true)
+                button.mouseDown(with: down)
+                button.onHold = original
+                checks[prefix + "ToolbarReleaseOutsideDoesNotLatch"] = transitions == [true, false] && !surface.eraserHeld && surface.engine.tool == .pen
+            } else { checks[prefix + "ToolbarReleaseOutsideDoesNotLatch"] = false }
+            surface.engine.clear(); surface.drawingMode = .holdToDraw; surface.engine.color = .graphite
+            let black = InkStroke(points: [InkPoint(0.44, 0.5), InkPoint(0.56, 0.5)], color: InkColor(rawValue: "#000000")!, width: 0.1)
+            surface.engine.document.strokes = [black]
+            touch(606, 0.5, 0.5)
+            func cursorColors() -> (light: Int, dark: Int) {
+                guard let rep = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) else { return (0, 0) }
+                surface.cacheDisplay(in: surface.bounds, to: rep)
+                let sx = Double(rep.pixelsWide) / surface.bounds.width, sy = Double(rep.pixelsHigh) / surface.bounds.height
+                let centerX = surface.paperRect.midX * sx, centerY = surface.paperRect.midY * sy
+                var light = 0, dark = 0
+                for y in Int(centerY - 19 * sy)...Int(centerY + 19 * sy) {
+                    for x in Int(centerX - 19 * sx)...Int(centerX + 19 * sx) {
+                        if let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) {
+                            if c.alphaComponent > 0.8 && min(c.redComponent, c.greenComponent, c.blueComponent) > 0.8 { light += 1 }
+                            if c.alphaComponent > 0.8 && max(c.redComponent, c.greenComponent, c.blueComponent) < 0.2 { dark += 1 }
+                        }
+                    }
+                }
+                return (light, dark)
+            }
+            checks[prefix + "CursorVisibleOverSolidBlackInk"] = cursorColors().light > 20
+            snapshot(surface, prefix + "-cursor-dark.png")
+            surface.engine.document.strokes = []
+            checks[prefix + "CursorVisibleOverLightOrTransparentBackground"] = cursorColors().dark > 20
+            touch(nil)
+            surface.engine.clear(); surface.engine.document = displayDocument; surface.engine.color = displayColor
             surface.stopWriting()
         }
 
@@ -125,10 +204,14 @@ extension AppDelegate {
         toggleDesktop()
         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         let boardColor = canvas.engine.color
+        desktop.pause()
+        checks["menuBarOneClickResumesPausedDesktop"] = quickResumeDesktop() && desktop.canvas.isWriting && !desktop.overlay.ignoresMouseEvents
+        checks["menuBarResumeDoesNotToggleActiveDrawing"] = !quickResumeDesktop() && desktop.canvas.isWriting
         exercise(desktop.canvas, window: desktop.overlay, prefix: "desktopTool", route: desktop.handleKeyboard)
         checks["recentColorsSharedAcrossSurfaces"] = preferences.recent.colors.contains { $0.rgb == boardColor.rgb } && preferences.recent.colors.first?.rgb == desktop.canvas.engine.color.rgb
         snapshot(desktop.toolbar.contentView!, "desktop-tools.png")
         desktop.finish()
+        checks["menuBarResumeDoesNothingOutsideDesktop"] = !quickResumeDesktop()
         checks["toolsExitRestoresCursor"] = !desktop.canvas.cursorDetached && !desktop.canvas.cursorHidden && !canvas.cursorDetached && !canvas.cursorHidden
 
         // Pixel-level rendering: local erasure, transparent overlay, later ink, undo and reload.

@@ -1,13 +1,13 @@
-# 下载 · 0.5.0
+# 下载 · 0.5.1 预览版
 
-- [Apple Silicon 应用与说明文档](ZkalanInkDeck-0.5.0-macOS-arm64.zip)
-- [验证图像与结果包](ZkalanInkDeck-0.5.0-validation.zip)
+- [Apple Silicon 应用与说明文档](ZkalanInkDeck-0.5.1-macOS-arm64.zip)
+- [验证图像与结果包](ZkalanInkDeck-0.5.1-validation.zip)
 - [SHA-256 校验文件](SHA256SUMS.txt)
-- [GitHub Release](https://github.com/zkalan/zkalan-inkdeck/releases/tag/v0.5.0)
+- [GitHub Release](https://github.com/zkalan/zkalan-inkdeck/releases/tag/v0.5.1)
 
 要求：macOS 13+，Apple Silicon。应用采用临时签名，尚无 Apple 公证；安装说明见根目录 README。
 
-0.5 默认按住空格画图、松开预览；新增原生调色盘、最近六个颜色与局部橡皮擦，连续书写与按压落笔可选，主画板和桌面均可用。63 项模型检查、130 项应用检查全部通过，实际触控板手感仍需试用，详见 [验证记录](../artifacts/v0.5/VALIDATION.md)。
+0.5.1 默认按住空格画图、松开预览；按住 E 临时擦除、松开结束，黑白双层指针，桌面暂停后可单击菜单栏画笔恢复。保留调色盘与最近六色，连续书写与按压落笔可选，主画板和桌面均可用。模型检查 63 项通过；完整桌面回归受前台焦点阻塞，本版先供试用，实际触控板手感仍需试用，详见 [验证记录](../artifacts/v0.5.1/VALIDATION.md)。
 
 应用包包含说明文档，验证包包含合成输入图像和结果。个人草稿、备份及凭据不包含在发布内容中。
 

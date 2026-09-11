@@ -1,0 +1,4 @@
+{
+  "testSetupError" : "InkDeck did not receive foreground focus; bring the test window to the front and retry.",
+  "testWindowHasForeground" : false
+}

@@ -22,7 +22,7 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
     private let palette: InkPalette
     private let colors: ColorControls
     private let drawingModeControl = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let eraserButton = NSButton(title: "橡皮擦 E", target: nil, action: nil)
+    private let eraserButton = HoldEraserButton(title: "按住 E 擦除", target: nil, action: nil)
     private var screenID = ""
     private var documents: [String: InkDocument] = [:]
     private var saveTimer: Timer?
@@ -90,9 +90,9 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
         drawingModeControl.controlSize = .small; drawingModeControl.target = self
         drawingModeControl.action = #selector(changeDrawingMode(_:))
         drawingModeControl.toolTip = "M 切换输入方式"
-        eraserButton.bezelStyle = .rounded; eraserButton.controlSize = .small; eraserButton.setButtonType(.toggle)
-        eraserButton.target = self; eraserButton.action = #selector(toggleEraser)
-        eraserButton.toolTip = "E 切换 · 移动手指擦除 · Z 撤销"
+        eraserButton.bezelStyle = .rounded; eraserButton.controlSize = .small; eraserButton.setButtonType(.momentaryPushIn)
+        eraserButton.onHold = { [weak self] pressed in self?.setEraserHeld(pressed) }
+        eraserButton.toolTip = "按住 E 或此按钮移动擦除 · 松开结束 · Z 撤销"
         let eraserSize = NSSlider(value: 26, minValue: 6, maxValue: 80, target: self, action: #selector(changeEraserSize(_:)))
         eraserSize.controlSize = .small; eraserSize.widthAnchor.constraint(equalToConstant: 48).isActive = true
         eraserSize.setAccessibilityLabel("桌面橡皮擦直径")
@@ -117,7 +117,7 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
             stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -7)
         ])
         let controller = NSViewController()
-        let text = NSTextField(wrappingLabelWithString: "桌面标记 · 单键操作\n\nEnter　暂停标记，操作下面的软件\nZ / Y　撤销 / 重做\nC　清空标记（会先确认）\n按住空格　画图（默认模式）\nE　切换橡皮擦，直接移动擦除\nK　调色盘　M　切换输入方式\nF / Esc　退出桌面标记\nH　打开 / 收起本说明\n\n默认松开空格只预览；连续书写时空格预览。按压落笔模式需按下 Force Touch 触控板，空格暂停。\n暂停后点「继续标记」恢复；工具条可拖动。\n使用菜单栏的画笔图标，可从其他应用进入。\n触控板四角对应当前屏幕四角；「换屏」切换显示器。桌面模式固定视图，双指暂停落笔。\n\n标记停留在屏幕位置，翻页或移动窗口后可清空重画。屏幕共享时请选择整个屏幕。")
+        let text = NSTextField(wrappingLabelWithString: "桌面标记 · 单键操作\n\nEnter　暂停标记，操作下面的软件\nZ / Y　撤销 / 重做\nC　清空标记（会先确认）\n按住空格　画图（默认模式）\n按住 E　临时擦除，松开结束\nK　调色盘　M　切换输入方式\nF / Esc　退出桌面标记\nH　打开 / 收起本说明\n\n默认松开空格只预览；连续书写时空格预览。按压落笔模式需按下 Force Touch 触控板，空格暂停。\n暂停后单击菜单栏画笔或「继续标记」恢复。\n画笔图标右键打开菜单；工具条可拖动。\n触控板四角对应当前屏幕四角；「换屏」切换显示器。桌面模式固定视图，双指暂停落笔。\n\n标记停留在屏幕位置，翻页或移动窗口后可清空重画。屏幕共享时请选择整个屏幕。")
         text.font = .systemFont(ofSize: 12); text.preferredMaxLayoutWidth = 288
         let helpRoot = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 420))
         helpRoot.wantsLayer = true; helpRoot.layer?.backgroundColor = root.layer?.backgroundColor
@@ -213,6 +213,9 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
     }
 
     func handleKeyboard(_ event: NSEvent) -> NSEvent? {
+        if event.keyCode == 14 && event.type == .keyUp && canvas.eraserHeld {
+            canvas.setEraserHeld(false); return nil
+        }
         // Always release the clutch, including when modifiers change before key-up.
         if event.keyCode == 49 && event.type == .keyUp && canvas.spacePressed {
             canvas.setSpacePressed(false); return nil
@@ -239,7 +242,7 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
         case 16: redo()
         case 8: clearMarks()
         case 4: showHelp()
-        case 14: toggleEraser()
+        case 14: setEraserHeld(true)
         case 40: showPalette()
         case 46: toggleDrawingMode()
         default: return event
@@ -254,9 +257,9 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
         pause()
         palette.show(color: canvas.engine.color, preferences: preferences, onSelect: { [weak self] in self?.selectColor($0) }, onDone: { [weak self] in self?.resume() })
     }
-    @objc func toggleEraser() {
-        canvas.toggleEraser()
-        if !canvas.isWriting { resume() }
+    func setEraserHeld(_ pressed: Bool) {
+        if pressed && !canvas.isWriting { resume() }
+        canvas.setEraserHeld(pressed)
     }
     @objc private func changeEraserSize(_ sender: NSSlider) { canvas.engine.finish(); canvas.eraserDiameter = sender.doubleValue; canvas.changed() }
     @objc private func changeDrawingMode(_ sender: NSPopUpButton) {
@@ -294,7 +297,7 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
         undoButton.isEnabled = canvas.engine.canUndo; redoButton.isEnabled = canvas.engine.canRedo
         hint.stringValue = saveError ?? (canvas.isWriting
             ? "\(canvas.inputHint) · Enter 操作桌面 · \(canvas.engine.document.strokes.count) 笔"
-            : "○ 操作桌面 · 标记保留可见，点击和滚动穿过标记层 · 点「继续标记」恢复 · 工具条可拖动")
+            : "○ 操作桌面 · 标记保留可见，点击和滚动穿过标记层 · 单击菜单栏画笔或「继续标记」恢复")
         onChange?()
     }
 
@@ -339,8 +342,19 @@ final class DesktopOverlay: NSObject, NSWindowDelegate {
         checks["desktopCoversWholeScreen"] = NSScreen.screens.contains { $0.frame == overlay.frame } && canvas.paperRect == canvas.bounds
         checks["desktopAboveNormalWindows"] = overlay.level.rawValue > NSWindow.Level.normal.rawValue
         checks["desktopAllSpacesConfigured"] = overlay.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications])
-        checks["desktopTouchTargetAtScreenCenter"] = NSWindow.windowNumber(at: NSPoint(x: overlay.frame.midX, y: overlay.frame.midY), belowWindowWithWindowNumber: 0) == overlay.windowNumber
-        checks["desktopCenterWindowNumber"] = NSWindow.windowNumber(at: NSPoint(x: overlay.frame.midX, y: overlay.frame.midY), belowWindowWithWindowNumber: 0)
+        let center = NSPoint(x: overlay.frame.midX, y: overlay.frame.midY)
+        let inputDeadline = Date().addingTimeInterval(1)
+        var centerHit = NSWindow.windowNumber(at: center, belowWindowWithWindowNumber: 0)
+        var centerHits = [centerHit]
+        // Showing the input backing and updating WindowServer hit testing are asynchronous.
+        while centerHit != overlay.windowNumber && Date() < inputDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05)); NSApp.updateWindows()
+            centerHit = NSWindow.windowNumber(at: center, belowWindowWithWindowNumber: 0)
+            centerHits.append(centerHit)
+        }
+        checks["desktopTouchTargetAtScreenCenter"] = centerHit == overlay.windowNumber
+        checks["desktopCenterWindowNumber"] = centerHit
+        checks["desktopCenterHitWindowNumbers"] = centerHits
         checks["desktopWindowNumber"] = overlay.windowNumber
         let documentAspect = canvas.engine.document.aspect
         func finger(_ id: Int, _ x: Double, _ y: Double, _ timestamp: Double) -> FingerSample {
