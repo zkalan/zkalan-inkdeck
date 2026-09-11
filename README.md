@@ -6,7 +6,7 @@
 
 [下载应用](https://github.com/zkalan/zkalan-inkdeck/releases/tag/v0.5.1) · [备用下载与校验文件](downloads) · [验证记录](artifacts/v0.5.1/VALIDATION.md) · [版本说明](CHANGELOG.md) · [代码来源与依赖](PROVENANCE.md)
 
-当前预览版 0.5.1（稳定版为 0.5.0）。模型检查 63 项通过，完整桌面回归受前台焦点阻塞，详见验证记录；验证使用合成触控/压力以及真实桌面窗口，实物书写手感和会议软件的共享效果仍需试用确认。
+当前发布版本 0.5.1，已由用户实机试用并确认可以正常使用。模型检查 63 项通过；完整桌面自动回归仍有未完成部分，详见验证记录。应用定位为示意图、圈注和桌面讲解工具，触控板的定位与压力信息有限，无法提供专用触控笔一样的书写手感。会议共享效果仍需在所用软件中确认。
 
 ![调色与局部擦除](artifacts/v0.5.1/tools-demo.png)
 
@@ -145,7 +145,7 @@ zsh scripts/install.sh
 
 `artifacts/v0.5.1/` 存放结果 JSON、画板与桌面工具条、帮助、透明层、合成演示及导出图片。低压力示例从上到下为原始压力 0%、2%、10%，每条线交替慢速和快速；这些是合成输入。自动测试不读取或修改用户草稿，也不截取桌面内容，不能替代真实硬件触控、压力采样和手感测试。
 
-`scripts/package.sh` 将已构建应用、说明文档和验证制品打包到 `release/` 并生成 SHA-256。源码和测试制品保存在仓库，应用 ZIP、验证 ZIP 与校验文件发布到 GitHub Release，并在 `downloads/` 目录保留备用下载。
+`scripts/package.sh` 将已构建应用、说明文档和验证制品打包到 `release/` 并生成 SHA-256，退出时清理打包暂存目录。`scripts/install.sh` 把旧应用保存为 ZIP 备份，草稿另行备份，避免备份也被系统识别成另一份应用。源码和测试制品保存在仓库，应用 ZIP、验证 ZIP 与校验文件发布到 GitHub Release，并在 `downloads/` 目录保留备用下载。
 
 ## 技术边界
 
@@ -154,6 +154,6 @@ zsh scripts/install.sh
 - 橡皮擦按顺序合成到独立透明笔迹层，只清除此前笔迹；不擦除底层画板或桌面。
 - 画笔使用每点粗细和曲线生成矢量轮廓，缓存笔画路径；视窗移动时复用路径，并剔除不可见笔画。
 - 退出、失焦、最小化或调整窗口会结束书写模式并配对恢复光标。
-- 桌面使用透明 `NSPanel`，通过公开 `ignoresMouseEvents` 切换操作穿透；绘制时使用 1% 底色让透明区域参与系统命中，暂停时移除此底色。已验证透明窗口中心可以命中手写应用。
+- 桌面使用透明 `NSPanel`，通过公开 `ignoresMouseEvents` 切换操作穿透；绘制时使用 1% 底色让透明区域参与系统命中，暂停时移除此底色。透明窗口的系统点击路由仍受前台状态与窗口更新时序影响，自动验证的实际结果见验证记录。
 
 参考：[Apple 触控事件](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/EventOverview/HandlingTouchEvents/HandlingTouchEvents.html)、[压力配置](https://developer.apple.com/documentation/appkit/nspressureconfiguration)、[压力事件](https://developer.apple.com/documentation/appkit/nsresponder/pressurechange(with:))。

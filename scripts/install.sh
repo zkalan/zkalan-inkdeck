@@ -10,7 +10,10 @@ codesign --verify --deep --strict "$app_dir"
 xcrun swiftc -module-cache-path "$project_dir/.build/module-cache" "$project_dir/scripts/AppLifecycle.swift" -o "$project_dir/.build/app-lifecycle"
 "$project_dir/.build/app-lifecycle" --quit
 backup_dir=$(mktemp -d "$project_dir/.backups/before-$version.XXXXXX")
-if [[ -d "$installed_app" ]]; then ditto "$installed_app" "$backup_dir/Zkalan InkDeck.app"; fi
+if [[ -d "$installed_app" ]]; then
+    ditto -c -k --norsrc --keepParent "$installed_app" "$backup_dir/previous-app.zip"
+    unzip -tq "$backup_dir/previous-app.zip"
+fi
 drafts_dir="$HOME/Library/Application Support/TrackpadInk"
 if [[ -d "$drafts_dir" ]]; then ditto "$drafts_dir" "$backup_dir/TrackpadInk"; fi
 stage_dir=$(mktemp -d "$applications_dir/.inkdeck-install.XXXXXX")
@@ -21,8 +24,8 @@ if ! mv "$stage_dir/Zkalan InkDeck.app" "$installed_app"; then
     if [[ -d "$stage_dir/previous.app" ]]; then mv "$stage_dir/previous.app" "$installed_app"; fi
     exit 1
 fi
-# Keep the prior copy in the ignored backup; remove only this installation's staging files.
-if [[ -d "$stage_dir/previous.app" ]]; then mv "$stage_dir/previous.app" "$backup_dir/replaced.app"; fi
+# The prior app is preserved in previous-app.zip, not as another discoverable app bundle.
+if [[ -d "$stage_dir/previous.app" ]]; then rm -rf -- "$stage_dir/previous.app"; fi
 rmdir "$stage_dir"
 codesign --verify --deep --strict "$installed_app"
 print -r -- "Installed Zkalan InkDeck $version; previous app and drafts backed up in .backups/."

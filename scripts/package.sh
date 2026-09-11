@@ -6,6 +6,7 @@ version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_d
 release_dir="$project_dir/release"
 mkdir -p "$release_dir" "$project_dir/.build"
 stage_dir=$(mktemp -d "$project_dir/.build/package-$version.XXXXXX")
+trap 'rm -rf -- "$stage_dir"' EXIT
 codesign --verify --deep --strict "$app_dir"
 ditto "$app_dir" "$stage_dir/Zkalan InkDeck.app"
 cp "$project_dir/README.md" "$project_dir/CHANGELOG.md" "$project_dir/PROVENANCE.md" "$stage_dir/"
